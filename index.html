@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>서재</title>
+<title>책은성장</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#f3eee2">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="서재">
+<meta name="apple-mobile-web-app-title" content="책은성장">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="icon" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,6 +43,14 @@
     border-radius:8px;font-family:var(--serif);letter-spacing:.08em}
   .nav button.on{color:var(--accent);background:#eae2cf;font-weight:700}
 
+  .search{margin-bottom:16px;background:#fff}
+  .daily{display:block;width:100%;text-align:left;background:var(--card);
+    border:1px solid var(--rule);border-left:3px solid var(--accent);
+    border-radius:0 10px 10px 0;padding:17px 17px 15px;margin-bottom:24px}
+  .daily .cap{display:block;color:var(--accent);font-size:11px;letter-spacing:.16em;margin-bottom:9px}
+  .daily .txt{display:block;font-family:var(--serif);font-size:16.5px;line-height:1.9;
+    color:var(--ink);white-space:pre-wrap}
+  .daily .from{display:block;margin-top:11px;color:var(--soft);font-size:12px}
   .shelf-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:9px;width:100%;
     border-bottom:4px solid var(--wood);margin-bottom:28px;box-shadow:0 4px 8px -5px rgba(80,60,30,.45)}
   .spine{height:158px;border-radius:3px 3px 0 0;display:flex;align-items:center;justify-content:center;
@@ -78,7 +86,11 @@
 
   .topic{border:1px solid var(--rule);border-radius:10px;padding:17px;margin-bottom:14px;background:var(--card)}
   .topic h3{font-family:var(--serif);font-size:18px;margin:0 0 10px;font-weight:700;line-height:1.4}
-  .topic .num{color:var(--accent);font-size:12px;letter-spacing:.18em;display:block;margin-bottom:6px}
+  .topic .num{color:var(--accent);font-size:12px;letter-spacing:.14em;display:inline-block;
+    margin-bottom:7px;background:#f0e6d0;padding:2px 9px;border-radius:11px;font-weight:500}
+  .loose{margin-top:14px;padding:12px 13px;background:#f4ece4;border-left:2px solid var(--rose);
+    border-radius:0 7px 7px 0;font-size:14px;line-height:1.7}
+  .loose b{display:block;color:var(--rose);font-size:11px;letter-spacing:.14em;margin-bottom:5px;font-weight:500}
   .topic .tq{font-family:var(--serif);font-size:15px;line-height:1.8;border-left:2px solid var(--rose);
     padding:2px 0 2px 13px;margin:12px 0;color:#4a453a;white-space:pre-wrap}
   .topic .tq .pg{display:block;font-family:var(--sans);font-size:11px;color:var(--soft);margin-top:5px}
@@ -193,7 +205,7 @@ function Auth() {
   };
   return (
     <div style={{paddingTop:"20vh"}}>
-      <h1 style={{fontFamily:"var(--serif)",fontSize:31,letterSpacing:".12em",margin:"0 0 12px"}}>서재</h1>
+      <h1 style={{fontFamily:"var(--serif)",fontSize:31,letterSpacing:".12em",margin:"0 0 12px"}}>책은성장</h1>
       <p style={{color:"var(--soft)",fontSize:14,margin:"0 0 32px",lineHeight:1.85}}>
         읽은 책이 흩어지지 않도록.<br/>문장을 담고, 이야기하고, 남겨둡니다.
       </p>
@@ -204,10 +216,13 @@ function Auth() {
 }
 
 /* ═══════════ 서재 ═══════════ */
-function Shelf({ onOpen }) {
+function Shelf({ me, onOpen }) {
   const [books, setBooks] = useState(null);
+  const [quotes, setQuotes] = useState([]);
+  const [topics, setTopics] = useState([]);
   const [counts, setCounts] = useState({});
   const [adding, setAdding] = useState(false);
+  const [q, setQ] = useState("");
   const [f, setF] = useState({ title:"", author:"", publisher:"" });
   const [err, setErr] = useState("");
 
@@ -215,14 +230,36 @@ function Shelf({ onOpen }) {
     const { data: bs, error } = await sb.from("books").select("*")
       .order("created_at",{ascending:false});
     if (error) { setErr(error.message); setBooks([]); return; }
-    const mine = (bs||[]);
-    setBooks(mine);
-    const { data: qs } = await sb.from("quotes").select("book_id");
+    setBooks(bs || []);
+    const { data: qs } = await sb.from("quotes").select("*");
+    const list = qs || [];
+    setQuotes(list);
     const c = {};
-    (qs||[]).forEach(q => { c[q.book_id] = (c[q.book_id]||0) + 1; });
+    list.forEach(x => { c[x.book_id] = (c[x.book_id]||0) + 1; });
     setCounts(c);
+    const { data: ts } = await sb.from("topics").select("*");
+    setTopics(ts || []);
   };
   useEffect(() => { load(); }, []);
+
+  const bookById = {};
+  (books||[]).forEach(b => { bookById[b.id] = b; });
+
+  // 오늘의 문장 — 날짜를 씨앗으로 삼아 하루 동안 같은 문장이 뜹니다.
+  const daily = (() => {
+    if (!quotes.length) return null;
+    const d = new Date();
+    const seed = d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate();
+    return quotes[seed % quotes.length];
+  })();
+
+  // 검색 — 문장 본문·메모·주제 제목·요약·키워드를 함께 훑습니다.
+  const term = q.trim().toLowerCase();
+  const hit = (s) => s && s.toLowerCase().includes(term);
+  const results = !term ? null : {
+    quotes: quotes.filter(x => hit(x.content) || hit(x.memo)),
+    topics: topics.filter(t => hit(t.title) || hit(t.summary) || hit(t.keyword) || hit(t.unresolved))
+  };
 
   const add = async () => {
     if (!f.title.trim()) return;
@@ -242,11 +279,72 @@ function Shelf({ onOpen }) {
       <div className="top"><h1>서재</h1><span className="sub">{books.length}권</span></div>
       {err && <div className="err">{err}</div>}
 
+      {books.length > 0 && (
+        <input className="search" value={q} onChange={e=>setQ(e.target.value)}
+          placeholder="문장·주제 찾기"/>
+      )}
+
+      {results ? (
+        (results.quotes.length + results.topics.length === 0) ? (
+          <div className="empty">찾는 것이 없습니다.</div>
+        ) : (
+          <>
+            {results.quotes.map(x => {
+              const b = bookById[x.book_id];
+              return (
+                <button className="card" style={{width:"100%",textAlign:"left"}} key={x.id}
+                  onClick={()=>b && onOpen(b)}>
+                  <div className="qmeta">
+                    <span className="pg">{b ? b.title : "책"}</span>
+                    {x.page && <span>{x.page}쪽</span>}
+                  </div>
+                  <div className="quote">{x.content}</div>
+                  {x.memo && <div className="memo">{x.memo}</div>}
+                </button>
+              );
+            })}
+            {results.topics.map(t => {
+              const b = bookById[t.book_id];
+              return (
+                <button className="card" style={{width:"100%",textAlign:"left"}} key={t.id}
+                  onClick={()=>b && onOpen(b)}>
+                  <div className="qmeta">
+                    <span className="pg">{b ? b.title : "책"}</span>
+                    <span>{t.keyword || "정리"}</span>
+                  </div>
+                  <div style={{fontFamily:"var(--serif)",fontSize:16,fontWeight:700}}>{t.title}</div>
+                  {t.summary && <div className="memo">{t.summary}</div>}
+                </button>
+              );
+            })}
+          </>
+        )
+      ) : (
+      <>
+      {daily && (
+        <button className="daily" onClick={()=>{
+          const b = bookById[daily.book_id]; if (b) onOpen(b);
+        }}>
+          <span className="cap">오늘 다시 만난 문장</span>
+          <span className="txt">{daily.content}</span>
+          <span className="from">
+            {(bookById[daily.book_id] || {}).title || ""}{daily.page ? " · " + daily.page + "쪽" : ""}
+          </span>
+        </button>
+      )}
+
       {books.length === 0 ? (
-        <div className="empty">
-          <b>아직 꽂힌 책이 없습니다</b>
-          첫 책을 등록하면 여기에 책등이 세워집니다.
-        </div>
+        me.member ? (
+          <div className="empty">
+            <b>아직 꽂힌 책이 없습니다</b>
+            첫 책을 등록하면 여기에 책등이 세워집니다.
+          </div>
+        ) : (
+          <div className="empty">
+            <b>서재는 초대받은 분만 쓸 수 있습니다</b>
+            사랑방에서는 올라온 책을 읽고<br/>의견을 남기실 수 있습니다.
+          </div>
+        )
       ) : (
         <div className="shelf-row">
           {books.map(b => {
@@ -260,11 +358,14 @@ function Shelf({ onOpen }) {
               </button>
             );
           })}
-          <button className="spine add" onClick={()=>setAdding(true)}>＋</button>
+          <button className="spine add" onClick={()=>setAdding(true)}
+            style={{display: me.member ? "flex" : "none"}}>＋</button>
         </div>
       )}
+      </>
+      )}
 
-      {books.length === 0 &&
+      {books.length === 0 && me.member &&
         <button className="btn" style={{width:"100%"}} onClick={()=>setAdding(true)}>책 등록하기</button>}
 
       {adding && (
@@ -293,21 +394,37 @@ function Shelf({ onOpen }) {
 /* ═══════════ 문장 ═══════════ */
 function Quotes({ book, quotes, reload }) {
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ page:"", content:"", memo:"" });
+  const [f, setF] = useState({ id:null, page:"", content:"", memo:"" });
   const [err, setErr] = useState("");
+
+  const blank = { id:null, page:"", content:"", memo:"" };
+
+  const startAdd = () => { setF(blank); setOpen(true); };
+  const startEdit = (q) => {
+    setF({ id:q.id, page:q.page||"", content:q.content||"", memo:q.memo||"" });
+    setOpen(true);
+  };
 
   const save = async () => {
     if (!f.content.trim()) return;
-    const { error } = await sb.from("quotes").insert({
-      book_id: book.id, page: f.page.trim() || null,
-      content: f.content.trim(), memo: f.memo.trim() || null, input_type: "typed"
-    });
+    setErr("");
+    const body = {
+      page: f.page.trim() || null,
+      content: f.content.trim(),
+      memo: f.memo.trim() || null
+    };
+    const { error } = f.id
+      ? await sb.from("quotes").update(body).eq("id", f.id)
+      : await sb.from("quotes").insert({ ...body, book_id: book.id, input_type: "typed" });
     if (error) { setErr(error.message); return; }
-    setOpen(false); setF({page:"",content:"",memo:""}); reload();
+    setOpen(false); setF(blank); reload();
   };
-  const del = async (id) => {
+
+  const del = async () => {
+    if (!f.id) return;
     if (!window.confirm("이 문장을 지웁니다. 되돌릴 수 없습니다.")) return;
-    await sb.from("quotes").delete().eq("id", id); reload();
+    await sb.from("quotes").delete().eq("id", f.id);
+    setOpen(false); setF(blank); reload();
   };
 
   return (
@@ -322,18 +439,19 @@ function Quotes({ book, quotes, reload }) {
         <div className="card" key={q.id}>
           <div className="qmeta">
             {q.page && <span className="pg">{q.page}</span>}
-            <button style={{marginLeft:"auto",color:"var(--soft)",fontSize:12}} onClick={()=>del(q.id)}>지우기</button>
+            <button style={{marginLeft:"auto",color:"var(--soft)",fontSize:12}}
+              onClick={()=>startEdit(q)}>고치기</button>
           </div>
           <div className="quote">{q.content}</div>
           {q.memo && <div className="memo">{q.memo}</div>}
         </div>
       ))}
-      <button className="btn fab" onClick={()=>setOpen(true)}>문장 담기</button>
+      <button className="btn fab" onClick={startAdd}>문장 담기</button>
 
       {open && (
         <div className="sheet" onClick={e=>e.target===e.currentTarget&&setOpen(false)}>
           <div className="box">
-            <h2>문장 담기</h2>
+            <h2>{f.id ? "문장 고치기" : "문장 담기"}</h2>
             <div className="field"><label>쪽수 (선택)</label>
               <input value={f.page} onChange={e=>setF({...f,page:e.target.value})} placeholder="112"/></div>
             <div className="field"><label>문장</label>
@@ -342,8 +460,12 @@ function Quotes({ book, quotes, reload }) {
               <textarea rows="2" value={f.memo} onChange={e=>setF({...f,memo:e.target.value})}/></div>
             <div className="row" style={{marginTop:8}}>
               <button className="btn ghost" onClick={()=>setOpen(false)}>취소</button>
-              <button className="btn" onClick={save}>담기</button>
+              <button className="btn" onClick={save}>{f.id ? "고치기" : "담기"}</button>
             </div>
+            {f.id && (
+              <button style={{width:"100%",marginTop:14,color:"var(--rose)",fontSize:13.5}}
+                onClick={del}>이 문장 지우기</button>
+            )}
           </div>
         </div>
       )}
@@ -421,6 +543,7 @@ function Talk({ book, quotes, me, onOrganized }) {
         const { data: tp, error } = await sb.from("topics").insert({
           book_id: book.id, session_id: session.id,
           title: t.title, summary: t.summary || null,
+          keyword: t.keyword || null, unresolved: t.unresolved || null,
           apply_note: t.apply_note || null, order_no: start + i
         }).select().single();
         if (error) throw new Error(error.message);
@@ -528,7 +651,7 @@ function TopicList({ bookId, me, canWrite }) {
       {err && <div className="err">{err}</div>}
       {data.map((t, i) => (
         <div className="topic" key={t.id}>
-          <span className="num">주제 {String(i+1).padStart(2,"0")}</span>
+          <span className="num">{t.keyword ? t.keyword : "주제 " + String(i+1).padStart(2,"0")}</span>
           <h3>{t.title}</h3>
           {t.summary && <div style={{fontSize:14.5,lineHeight:1.75,color:"#57513f"}}>{t.summary}</div>}
           {t.quotes.map(q => (
@@ -544,6 +667,7 @@ function TopicList({ bookId, me, canWrite }) {
                   onClick={()=>delOpinion(o.id)}>지우기</button>}
             </div>
           ))}
+          {t.unresolved && <div className="loose"><b>매듭짓지 못한 것</b>{t.unresolved}</div>}
           {t.apply_note && <div className="apply"><b>내게 적용할 점</b>{t.apply_note}</div>}
           {canWrite && (
             <div className="opbox">
@@ -889,10 +1013,12 @@ function App() {
 
   const loadMe = async (uid) => {
     const { data } = await sb.from("profiles").select("*").eq("id", uid).single();
+    const { data: mem } = await sb.rpc("is_member");
     setMe({
       id: uid,
       name: (data && data.display_name) || null,
-      shelfPublic: !!(data && data.shelf_public)
+      shelfPublic: !!(data && data.shelf_public),
+      member: !!mem
     });
   };
 
@@ -909,7 +1035,7 @@ function App() {
 
   if (CONFIG_ERROR) return (
     <div style={{paddingTop:"20vh"}}>
-      <h1 style={{fontFamily:"var(--serif)",fontSize:30,letterSpacing:".1em",margin:"0 0 18px"}}>서재</h1>
+      <h1 style={{fontFamily:"var(--serif)",fontSize:30,letterSpacing:".1em",margin:"0 0 18px"}}>책은성장</h1>
       <div className="err">{CONFIG_ERROR}</div>
     </div>
   );
@@ -929,7 +1055,7 @@ function App() {
   else if (route && route.v === "profile")
     body = <Profile me={me} onBack={()=>setRoute(null)} onSaved={()=>loadMe(me.id)}/>;
   else if (tab === "shelf")
-    body = <Shelf onOpen={(b)=>setRoute({v:"book",book:b})}/>;
+    body = <Shelf me={me} onOpen={(b)=>setRoute({v:"book",book:b})}/>;
   else
     body = <Sarangbang me={me}
              onOpen={(id)=>setRoute({v:"shared",id})}
