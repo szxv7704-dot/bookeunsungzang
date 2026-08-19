@@ -44,6 +44,33 @@
   .nav button.on{color:var(--accent);background:#eae2cf;font-weight:700}
 
   .search{margin-bottom:16px;background:#fff}
+
+  /* 표지 격자 */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:26px}
+  .gcard{position:relative;text-align:left;padding:0}
+  .gcard img{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:4px;
+    box-shadow:0 4px 12px rgba(80,60,30,.3);display:block}
+  .gblank{width:100%;aspect-ratio:2/3;border-radius:4px;display:flex;align-items:center;
+    justify-content:center;padding:10px;color:#f6f1e4;font-family:var(--serif);
+    font-size:13px;line-height:1.45;text-align:center;
+    box-shadow:0 4px 12px rgba(80,60,30,.3)}
+  .gdot{position:absolute;top:7px;right:7px;width:8px;height:8px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 0 2px #fbf8f0}
+  .gtitle{display:block;margin-top:7px;font-size:12.5px;line-height:1.45;color:var(--ink);
+    overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .gadd{border:1px dashed var(--rule);border-radius:4px;aspect-ratio:2/3;
+    display:flex;align-items:center;justify-content:center;color:var(--soft);font-size:24px}
+
+  /* 알라딘 검색 결과 */
+  .found{display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;
+    padding:12px 2px;border-bottom:1px solid var(--rule)}
+  .found img{width:44px;border-radius:3px;flex:none;box-shadow:0 2px 6px rgba(80,60,30,.25)}
+  .found .nocover{width:44px;height:64px;border-radius:3px;flex:none;display:block}
+  .found b{display:block;font-size:14.5px;font-weight:500;line-height:1.45;margin-bottom:4px}
+  .found .meta{display:block;color:var(--soft);font-size:12px;line-height:1.5}
+
+  .sthumb{width:44px;border-radius:3px;flex:none;box-shadow:0 2px 6px rgba(80,60,30,.25)}
+
   .daily{display:block;width:100%;text-align:left;background:var(--card);
     border:1px solid var(--rule);border-left:3px solid var(--accent);
     border-radius:0 10px 10px 0;padding:17px 17px 15px;margin-bottom:24px}
@@ -222,6 +249,12 @@ function Shelf({ me, onOpen }) {
   const [topics, setTopics] = useState([]);
   const [counts, setCounts] = useState({});
   const [adding, setAdding] = useState(false);
+  const [manual, setManual] = useState(false);
+  const [sq, setSq] = useState("");
+  const [found, setFound] = useState(null);
+  const [finding, setFinding] = useState(false);
+  const [addErr, setAddErr] = useState("");
+  const [view, setView] = useState("spine");
   const [q, setQ] = useState("");
   const [f, setF] = useState({ title:"", author:"", publisher:"" });
   const [err, setErr] = useState("");
@@ -268,15 +301,54 @@ function Shelf({ me, onOpen }) {
       author: f.author.trim() || null,
       publisher: f.publisher.trim() || null
     });
-    if (error) { setErr(error.message); return; }
-    setAdding(false); setF({title:"",author:"",publisher:""}); load();
+    if (error) { setAddErr(error.message); return; }
+    closeAdd(); load();
+  };
+
+  const closeAdd = () => {
+    setAdding(false); setManual(false); setSq(""); setFound(null); setAddErr("");
+    setF({title:"",author:"",publisher:""});
+  };
+
+  const findBook = async () => {
+    if (!sq.trim()) return;
+    setFinding(true); setAddErr(""); setFound(null);
+    try {
+      const r = await fetch("/api/aladin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: sq.trim() })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "검색에 실패했습니다.");
+      setFound(d.items || []);
+    } catch (e) { setAddErr(e.message); }
+    setFinding(false);
+  };
+
+  const addFrom = async (it) => {
+    const { error } = await sb.from("books").insert({
+      title: it.title, author: it.author || null, publisher: it.publisher || null,
+      cover_url: it.cover || null, isbn13: it.isbn13 || null,
+      link: it.link || null, pub_date: it.pubDate || null
+    });
+    if (error) { setAddErr(error.message); return; }
+    closeAdd(); load();
   };
 
   if (books === null) return <div className="empty">불러오는 중</div>;
 
   return (
     <>
-      <div className="top"><h1>서재</h1><span className="sub">{books.length}권</span></div>
+      <div className="top">
+        <h1>서재</h1>
+        {books.length > 0 &&
+          <button className="sub" style={{color:"var(--accent)"}}
+            onClick={()=>setView(view==="spine"?"cover":"spine")}>
+            {view==="spine" ? "표지로 보기" : "책등으로 보기"}
+          </button>}
+        <span className="sub" style={{marginLeft:books.length>0?10:"auto"}}>{books.length}권</span>
+      </div>
       {err && <div className="err">{err}</div>}
 
       {books.length > 0 && (
@@ -345,7 +417,7 @@ function Shelf({ me, onOpen }) {
             사랑방에서는 올라온 책을 읽고<br/>의견을 남기실 수 있습니다.
           </div>
         )
-      ) : (
+      ) : view === "spine" ? (
         <div className="shelf-row">
           {books.map(b => {
             const n = counts[b.id] || 0;
@@ -361,6 +433,20 @@ function Shelf({ me, onOpen }) {
           <button className="spine add" onClick={()=>setAdding(true)}
             style={{display: me.member ? "flex" : "none"}}>＋</button>
         </div>
+      ) : (
+        <div className="grid">
+          {books.map(b => (
+            <button key={b.id} className="gcard" onClick={()=>onOpen(b)}>
+              {b.cover_url
+                ? <img src={b.cover_url} alt="" loading="lazy"/>
+                : <span className="gblank" style={{background:pick(b.title)}}>{b.title}</span>}
+              {b.shared_at && <span className="gdot"/>}
+              <span className="gtitle">{b.title}</span>
+            </button>
+          ))}
+          {me.member &&
+            <button className="gcard gadd" onClick={()=>setAdding(true)}>＋</button>}
+        </div>
       )}
       </>
       )}
@@ -369,21 +455,59 @@ function Shelf({ me, onOpen }) {
         <button className="btn" style={{width:"100%"}} onClick={()=>setAdding(true)}>책 등록하기</button>}
 
       {adding && (
-        <div className="sheet" onClick={e=>e.target===e.currentTarget&&setAdding(false)}>
+        <div className="sheet" onClick={e=>e.target===e.currentTarget&&closeAdd()}>
           <div className="box">
             <h2>책 등록</h2>
-            <div className="field"><label>제목</label>
-              <input value={f.title} onChange={e=>setF({...f,title:e.target.value})} autoFocus/></div>
-            <div className="row">
-              <div className="field"><label>지은이</label>
-                <input value={f.author} onChange={e=>setF({...f,author:e.target.value})}/></div>
-              <div className="field"><label>출판사</label>
-                <input value={f.publisher} onChange={e=>setF({...f,publisher:e.target.value})}/></div>
-            </div>
-            <div className="row" style={{marginTop:8}}>
-              <button className="btn ghost" onClick={()=>setAdding(false)}>취소</button>
-              <button className="btn" onClick={add}>책장에 꽂기</button>
-            </div>
+            {addErr && <div className="err">{addErr}</div>}
+
+            {!manual ? (
+              <>
+                <div className="field">
+                  <input value={sq} placeholder="제목이나 저자로 찾기" autoFocus
+                    onChange={e=>setSq(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&findBook()}/>
+                </div>
+                <button className="btn" style={{width:"100%"}} onClick={findBook} disabled={finding}>
+                  {finding ? "찾는 중" : "찾기"}
+                </button>
+
+                {found && found.length === 0 &&
+                  <div className="empty" style={{padding:"26px 0"}}>찾는 책이 없습니다.</div>}
+
+                {found && found.map((it, i) => (
+                  <button className="found" key={i} onClick={()=>addFrom(it)}>
+                    {it.cover
+                      ? <img src={it.cover} alt=""/>
+                      : <span className="nocover" style={{background:pick(it.title)}}/>}
+                    <span>
+                      <b>{it.title}</b>
+                      <span className="meta">
+                        {it.author}{it.publisher ? " · " + it.publisher : ""}
+                        {it.pubDate ? " · " + it.pubDate.slice(0,4) : ""}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+
+                <button style={{width:"100%",marginTop:16,color:"var(--soft)",fontSize:13.5}}
+                  onClick={()=>setManual(true)}>찾는 책이 없나요? 직접 입력하기</button>
+              </>
+            ) : (
+              <>
+                <div className="field"><label>제목</label>
+                  <input value={f.title} onChange={e=>setF({...f,title:e.target.value})} autoFocus/></div>
+                <div className="row">
+                  <div className="field"><label>지은이</label>
+                    <input value={f.author} onChange={e=>setF({...f,author:e.target.value})}/></div>
+                  <div className="field"><label>출판사</label>
+                    <input value={f.publisher} onChange={e=>setF({...f,publisher:e.target.value})}/></div>
+                </div>
+                <div className="row" style={{marginTop:8}}>
+                  <button className="btn ghost" onClick={()=>setManual(false)}>검색으로</button>
+                  <button className="btn" onClick={add}>책장에 꽂기</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -734,6 +858,18 @@ function BookView({ book, me, onBack, onChanged }) {
         </button>
       </div>
       {book.author && <div style={{color:"var(--soft)",fontSize:13,marginTop:-8}}>{book.author}</div>}
+      {book.cover_url && (
+        <div style={{display:"flex",gap:14,alignItems:"flex-start",marginTop:14}}>
+          <img src={book.cover_url} alt="" style={{width:78,borderRadius:4,
+            boxShadow:"0 3px 10px rgba(80,60,30,.28)"}}/>
+          <div style={{fontSize:12.5,color:"var(--soft)",lineHeight:1.8,paddingTop:2}}>
+            {book.publisher}{book.pub_date ? " · " + book.pub_date.slice(0,4) : ""}
+            {book.link &&
+              <a href={book.link} target="_blank" rel="noreferrer"
+                style={{display:"block",color:"var(--accent)",marginTop:5}}>알라딘에서 보기</a>}
+          </div>
+        </div>
+      )}
       {err && <div className="err" style={{marginTop:12}}>{err}</div>}
 
       <div className="tabs">
@@ -816,7 +952,9 @@ function Sarangbang({ me, onOpen, onPeek, onProfile }) {
       ) : rows.map(r => (
         <div key={r.id}>
           <button className="sbook" onClick={()=>onOpen(r.id)}>
-            <span className="bar" style={{background:pick(r.title)}}/>
+            {r.cover_url
+              ? <img className="sthumb" src={r.cover_url} alt="" loading="lazy"/>
+              : <span className="bar" style={{background:pick(r.title)}}/>}
             <span style={{flex:1}}>
               <h4>{r.title}</h4>
               <div className="meta">
@@ -866,6 +1004,15 @@ function SharedBook({ bookId, me, onBack }) {
       <div style={{color:"var(--soft)",fontSize:13,marginTop:-8,marginBottom:6}}>
         {info.author ? info.author + " · " : ""}{info.is_mine ? "내가 올림" : info.owner_name + "님이 올림"}
       </div>
+      {info.cover_url && (
+        <div style={{display:"flex",gap:14,alignItems:"flex-start",margin:"12px 0 4px"}}>
+          <img src={info.cover_url} alt="" style={{width:70,borderRadius:4,
+            boxShadow:"0 3px 10px rgba(80,60,30,.28)"}}/>
+          {info.link &&
+            <a href={info.link} target="_blank" rel="noreferrer"
+              style={{color:"var(--accent)",fontSize:12.5,paddingTop:2}}>알라딘에서 보기</a>}
+        </div>
+      )}
       {info.share_note && <div className="card" style={{fontSize:14,lineHeight:1.8}}>{info.share_note}</div>}
       <div style={{height:8}}/>
       <TopicList bookId={bookId} me={me} canWrite={true}/>
