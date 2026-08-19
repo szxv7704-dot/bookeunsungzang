@@ -1,6 +1,6 @@
 {
-  "name": "서재",
-  "short_name": "서재",
+  "name": "책은성장",
+  "short_name": "책은성장",
   "description": "읽은 책이 흩어지지 않도록. 문장을 담고, 이야기하고, 남겨둡니다.",
   "start_url": "/",
   "scope": "/",
