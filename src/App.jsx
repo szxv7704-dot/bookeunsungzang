@@ -65,6 +65,15 @@ function Nickname({ userId, onDone }) {
   );
 }
 
+function InviteOnly() {
+  return <main className="auth-page compact">
+    <Brand />
+    <h2>초대받은 사랑방입니다</h2>
+    <p>책은성장은 초대받은 Google 계정으로만 들어올 수 있습니다.<br />초대를 받은 계정이 맞는지 확인해 주세요.</p>
+    <button className="secondary wide" onClick={() => sb.auth.signOut()}>다른 Google 계정으로 로그인</button>
+  </main>;
+}
+
 async function loadThoughts(quoteIds) {
   if (!quoteIds.length) return { rows: [], available: true };
   const { data, error } = await sb.from("quote_thoughts").select("*").in("quote_id", quoteIds).order("created_at");
@@ -167,7 +176,39 @@ function DailyQuote({ quote, book, thoughts, onOpen, onAppend }) {
   );
 }
 
-function Home({ me, onOpenBook, onGoLibrary, onGoRooms }) {
+function NotificationBell({ me, onOpenShared }) {
+  const [rows, setRows] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [available, setAvailable] = useState(true);
+  const load = useCallback(async () => {
+    const { data, error } = await sb.from("reading_notifications").select("*").eq("recipient_id", me.id).order("created_at", { ascending: false }).limit(40);
+    if (error) { if (selectiveSharingError(error)) setAvailable(false); return; }
+    setAvailable(true); setRows(data || []);
+  }, [me.id]);
+  useEffect(() => {
+    load();
+    const channel = sb.channel(`notifications-${me.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "reading_notifications", filter: `recipient_id=eq.${me.id}` }, load).subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [load, me.id]);
+  const unread = rows.filter((row) => !row.read_at).length;
+  const show = async () => {
+    setOpen(true);
+    if (unread) {
+      const now = new Date().toISOString();
+      await sb.from("reading_notifications").update({ read_at: now }).eq("recipient_id", me.id).is("read_at", null);
+      setRows(rows.map((row) => row.read_at ? row : { ...row, read_at: now }));
+    }
+  };
+  if (!available) return null;
+  return <>
+    <button className="notification-button" onClick={show} aria-label={`알림 ${unread}개`}><span>알림</span>{unread > 0 && <b>{unread > 9 ? "9+" : unread}</b>}</button>
+    {open && <Sheet title="사랑방 소식" onClose={() => setOpen(false)}>
+      {!rows.length ? <div className="empty-state small"><span>아직 새 소식이 없습니다</span></div> : <div className="notification-list">{rows.map((row) => <button key={row.id} onClick={() => { setOpen(false); onOpenShared(row.book_id); }}><i>{(row.actor_name || "독").slice(0, 1)}</i><span><b>{row.actor_name}님이 《{row.book_title}》의 주제를 나눴습니다.</b><small>{row.topic_title}</small><time>{relativeDays(row.created_at)}</time></span></button>)}</div>}
+    </Sheet>}
+  </>;
+}
+
+function Home({ me, onOpenBook, onOpenShared, onGoLibrary, onGoRooms }) {
   const [data, setData] = useState({ books: [], quotes: [], thoughts: [], loading: true });
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
@@ -196,7 +237,7 @@ function Home({ me, onOpenBook, onGoLibrary, onGoRooms }) {
 
   return (
     <main className="page home-page">
-      <header className="page-header home-head"><Brand /><button className="profile-link" onClick={() => sb.auth.signOut()} title="로그아웃">{me.name}님의 오늘</button></header>
+      <header className="page-header home-head"><Brand /><div className="home-actions"><NotificationBell me={me} onOpenShared={onOpenShared} /><button className="profile-link" onClick={() => sb.auth.signOut()} title="로그아웃">{me.name}님의 오늘</button></div></header>
       <div className="home-intro">
         <p>읽는 사람의 시간이<br />조용히 깊어지는 곳.</p>
         <span>PRIVATE READING ROOM · SEOUL</span>
@@ -314,7 +355,7 @@ function Library({ me, onOpenBook }) {
             const chars = writtenByBook[book.id] || 0;
             const width = Math.min(74, 34 + Math.sqrt(chars) * 1.15);
             return <button className="book-spine" key={book.id} style={{ width, background: spineColor(book.title) }} onClick={() => onOpenBook(book)} title={`${book.title} · 내가 쓴 글 ${chars.toLocaleString()}자`}>
-              {book.shared_at && <i className="seal-dot" />}<span>{book.title}</span><small>{book.author}</small>
+              <span>{book.title}</span><small>{book.author}</small>
             </button>;
           })}
         </div><div className="shelf-board" /><p className="shelf-caption">내가 쓴 생각이 쌓일수록 책등도 조금씩 두꺼워집니다.</p></div>
@@ -357,7 +398,7 @@ function QuoteCard({ quote, thoughts, onReload }) {
   );
 }
 
-function Talk({ book, quotes, me, shared = false, onOrganized }) {
+function Talk({ book, quotes, me, onOrganized }) {
   const [session, setSession] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
@@ -365,13 +406,12 @@ function Talk({ book, quotes, me, shared = false, onOrganized }) {
   const [organizing, setOrganizing] = useState(false);
   const [error, setError] = useState("");
   const endRef = useRef(null);
-  const title = shared ? "사랑방 공동 AI 대화" : "개인 대화";
+  const title = "개인 대화";
 
   useEffect(() => {
     let channel;
     (async () => {
-      let query = sb.from("sessions").select("*").eq("book_id", book.id).eq("status", "open").order("created_at", { ascending: false }).limit(1);
-      query = shared ? query.eq("title", title) : query.in("title", ["대화", "개인 대화"]);
+      const query = sb.from("sessions").select("*").eq("book_id", book.id).eq("status", "open").in("title", ["대화", "개인 대화"]).order("created_at", { ascending: false }).limit(1);
       const { data } = await query;
       let found = data?.[0];
       if (!found) {
@@ -385,7 +425,7 @@ function Talk({ book, quotes, me, shared = false, onOrganized }) {
       channel = sb.channel(`talk-${found.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `session_id=eq.${found.id}` }, (payload) => setMessages((old) => old.some((item) => item.id === payload.new.id) ? old : [...old, payload.new])).subscribe();
     })();
     return () => { if (channel) sb.removeChannel(channel); };
-  }, [book.id, shared, title]);
+  }, [book.id]);
   useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), [messages]);
 
   const requestAnswer = async (history) => {
@@ -418,7 +458,7 @@ function Talk({ book, quotes, me, shared = false, onOrganized }) {
 
   const organize = async () => {
     if (organizing || messages.length < 2) return;
-    if (!window.confirm("여기까지 나눈 대화를 주제별 질문으로 정리합니다. AI 대화 원문은 공개되지 않고, 정리된 질문과 근거·의견만 질문 탭과 사랑방에 반영됩니다.")) return;
+    if (!window.confirm("여기까지 나눈 대화를 나의 독후감으로 정리합니다. 정리 결과는 내 서재에만 저장되며 사랑방에는 공유되지 않습니다.")) return;
     setOrganizing(true); setError("");
     try {
       const quoteMap = {};
@@ -471,10 +511,10 @@ function Talk({ book, quotes, me, shared = false, onOrganized }) {
 
   return (
     <section className="talk-panel">
-      <div className="talk-intro"><b>{shared ? "함께 생각을 넓히는 대화" : "나만의 생각 탐색"}</b><p>{shared ? "이곳의 대화는 사랑방 구성원에게 보입니다. 개인적인 탐색은 서재에서 이어가세요." : "AI의 해석은 정답이 아니라 다른 관점입니다. 남기고 싶은 부분만 사랑방에 가져가세요."}</p></div>
+      <div className="talk-intro"><b>나만의 생각 탐색</b><p>AI의 해석은 정답이 아니라 다른 관점입니다. 이 대화는 내 서재에만 머물며, 사랑방에는 내가 고른 정리 주제만 별도로 나눌 수 있습니다.</p></div>
       <div className="messages">{messages.map((message) => <article className={`message ${message.role === "ai" ? "ai" : "human"}`} key={message.id}><small>{message.author_name || (message.role === "ai" ? "AI" : "독자")}</small><p>{message.content}</p></article>)}<div ref={endRef} /></div>
       <ErrorNote>{error}</ErrorNote>
-      {!shared && messages.length >= 2 && <section className="organize-callout"><div><b>이 대화를 질문으로 남기기</b><p>흩어진 생각을 주제별 질문·근거 문장·각자의 의견으로 엮습니다. 정리 결과만 사랑방에 공유됩니다.</p></div><button className="primary" onClick={organize} disabled={organizing || busy}>{organizing ? "주제를 엮는 중…" : "여기까지 정리하기"}</button></section>}
+      {messages.length >= 2 && <section className="organize-callout"><div><b>나의 독후감으로 정리하기</b><p>흩어진 생각을 주제별 질문·근거 문장·생각의 흐름으로 엮어 내 서재에만 보관합니다. 사랑방 공유는 나중에 원하는 주제와 사람을 직접 고를 때만 이루어집니다.</p></div><button className="primary" onClick={organize} disabled={organizing || busy}>{organizing ? "독후감을 엮는 중…" : "여기까지 정리하기"}</button></section>}
       {messages.at(-1)?.role === "human" && !busy && <div className="ai-retry"><small>아직 AI 답변이 도착하지 않았습니다.</small><button className="secondary" onClick={retry}>AI 답변 다시 받기</button></div>}
       <div className="composer"><textarea rows="2" value={text} onChange={(event) => setText(event.target.value)} placeholder="무엇이 궁금한가요?" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} /><button className="primary" onClick={send} disabled={busy}>{busy ? "생각 중" : "보내기"}</button></div>
     </section>
@@ -510,14 +550,14 @@ function QuestionBoard({ bookId, me, canAsk = false }) {
   const submitQuestion = async () => {
     if (!question.title.trim()) return;
     const nextOrder = topics.length ? Math.max(...topics.map((topic) => topic.order_no || 0)) + 1 : 0;
-    const { data: sessionRows } = await sb.from("sessions").select("id").eq("book_id", bookId).eq("title", "사랑방 질문지").limit(1);
+    const { data: sessionRows } = await sb.from("sessions").select("id").eq("book_id", bookId).eq("title", "나의 독후감 질문").limit(1);
     let questionSessionId = sessionRows?.[0]?.id;
     if (!questionSessionId) {
-      const { data: made, error: sessionError } = await sb.from("sessions").insert({ book_id: bookId, title: "사랑방 질문지", status: "open" }).select("id").single();
+      const { data: made, error: sessionError } = await sb.from("sessions").insert({ book_id: bookId, title: "나의 독후감 질문", status: "open" }).select("id").single();
       if (sessionError) { setError(sessionError.message); return; }
       questionSessionId = made.id;
     }
-    const { data, error: insertError } = await sb.from("topics").insert({ book_id: bookId, session_id: questionSessionId, keyword: "함께 묻기", title: question.title.trim(), summary: question.rationale.trim() || null, order_no: nextOrder }).select().single();
+    const { data, error: insertError } = await sb.from("topics").insert({ book_id: bookId, session_id: questionSessionId, keyword: "직접 적은 질문", title: question.title.trim(), summary: question.rationale.trim() || null, order_no: nextOrder }).select().single();
     if (insertError) { setError(insertError.message); return; }
     if (question.quoteId) await sb.from("topic_quotes").insert({ topic_id: data.id, quote_id: question.quoteId });
     setQuestion({ title: "", rationale: "", quoteId: "" }); setAsking(false); load();
@@ -532,14 +572,14 @@ function QuestionBoard({ bookId, me, canAsk = false }) {
 
   return (
     <section className="question-board">
-      <div className="section-title"><div><div className="eyebrow">책에서 시작한 물음</div><h2>함께 묻고 답하기</h2></div>{canAsk && <button className="secondary" onClick={() => setAsking(true)}>질문 제안</button>}</div>
+      <div className="section-title"><div><div className="eyebrow">대화가 남긴 생각</div><h2>나의 독후감</h2></div>{canAsk && <button className="secondary" onClick={() => setAsking(true)}>질문 직접 쓰기</button>}</div>
       <ErrorNote>{error}</ErrorNote>
       {!topics.length && <div className="empty-state small"><span>아직 모인 질문이 없습니다</span><p>마음에 걸린 장면과 그 이유를 질문으로 건네보세요.</p></div>}
       {topics.map((topic, index) => {
         const evidence = links.filter((link) => link.topic_id === topic.id).map((link) => quoteMap[link.quote_id]).filter(Boolean);
         const answers = opinions.filter((opinion) => opinion.topic_id === topic.id);
         return <article className="question-card" key={topic.id}>
-          <div className="question-number">{topic.keyword && topic.keyword !== "함께 묻기" ? `대화에서 엮은 주제 · ${topic.keyword}` : `물음 ${String(index + 1).padStart(2, "0")}`}</div><h3>{topic.title}</h3>
+          <div className="question-number">{topic.keyword === "직접 적은 질문" ? "직접 적은 질문" : topic.keyword ? `대화에서 엮은 주제 · ${topic.keyword}` : `물음 ${String(index + 1).padStart(2, "0")}`}</div><h3>{topic.title}</h3>
           {topic.summary && <p className="rationale">{topic.summary}</p>}
           {evidence.map((quote) => <blockquote key={quote.id}>“{quote.content}”<small>{quote.page ? `${quote.page}쪽` : "책 속 문장"}</small></blockquote>)}
           {topic.unresolved && <div className="topic-note unresolved"><b>아직 남은 물음</b><p>{topic.unresolved}</p></div>}
@@ -548,24 +588,128 @@ function QuestionBoard({ bookId, me, canAsk = false }) {
           <div className="answer-box"><textarea rows="3" value={drafts[topic.id] || ""} onChange={(event) => setDrafts({ ...drafts, [topic.id]: event.target.value })} placeholder="내 생각과 책 속 근거를 함께 남겨보세요." /><button className="primary" onClick={() => answer(topic.id)}>답 남기기</button></div>
         </article>;
       })}
-      {asking && <Sheet title="사랑방에 질문 건네기" onClose={() => setAsking(false)}>
-        <label className="field"><span>함께 나누고 싶은 질문</span><textarea rows="4" value={question.title} onChange={(event) => setQuestion({ ...question, title: event.target.value })} autoFocus /></label>
+      {asking && <Sheet title="내 독후감에 질문 더하기" onClose={() => setAsking(false)}>
+        <p className="sheet-copy">이 질문은 내 서재에만 저장됩니다. 사랑방에는 별도로 공유할 때만 보입니다.</p>
+        <label className="field"><span>오래 붙들어 두고 싶은 질문</span><textarea rows="4" value={question.title} onChange={(event) => setQuestion({ ...question, title: event.target.value })} autoFocus /></label>
         <label className="field"><span>이 질문이 생긴 이유</span><textarea rows="4" value={question.rationale} onChange={(event) => setQuestion({ ...question, rationale: event.target.value })} /></label>
         <label className="field"><span>근거가 된 문장</span><select value={question.quoteId} onChange={(event) => setQuestion({ ...question, quoteId: event.target.value })}><option value="">선택하지 않음</option>{quotes.map((quote) => <option key={quote.id} value={quote.id}>{quote.page ? `${quote.page}쪽 · ` : ""}{quote.content.slice(0, 45)}</option>)}</select></label>
-        <button className="primary wide" onClick={submitQuestion}>질문 제안하기</button>
+        <button className="primary wide" onClick={submitQuestion}>내 독후감에 남기기</button>
       </Sheet>}
     </section>
   );
 }
 
-function BookView({ book, me, onBack, onShared }) {
+function selectiveSharingError(error) {
+  return error?.code === "PGRST202" || isMissingRelation(error) || /share_candidates|share_topics|shared_topics|schema cache/i.test(error?.message || "");
+}
+
+function ShareTopicsSheet({ book, onClose, onShared }) {
+  const [topics, setTopics] = useState([]);
+  const [people, setPeople] = useState([]);
+  const [selectedTopics, setSelectedTopics] = useState([]);
+  const [selectedPeople, setSelectedPeople] = useState([]);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => { (async () => {
+    const [{ data: topicRows, error: topicError }, peopleResult] = await Promise.all([
+      sb.from("topics").select("id,title,keyword,summary").eq("book_id", book.id).order("order_no"),
+      sb.rpc("share_candidates"),
+    ]);
+    if (topicError) setError(topicError.message);
+    else setTopics(topicRows || []);
+    if (peopleResult.error) setError(selectiveSharingError(peopleResult.error) ? "선택 공유용 데이터베이스 업데이트가 아직 적용되지 않았습니다." : peopleResult.error.message);
+    else setPeople(peopleResult.data || []);
+    setLoading(false);
+  })(); }, [book.id]);
+
+  const toggle = (list, setList, id) => setList(list.includes(id) ? list.filter((item) => item !== id) : [...list, id]);
+  const share = async () => {
+    if (!selectedTopics.length || !selectedPeople.length || busy) return;
+    setBusy(true); setError("");
+    const { data, error: shareError } = await sb.rpc("share_topics", {
+      p_topic_ids: selectedTopics,
+      p_recipient_ids: selectedPeople,
+      p_message: message.trim() || null,
+    });
+    setBusy(false);
+    if (shareError) {
+      setError(selectiveSharingError(shareError) ? "선택 공유용 데이터베이스 업데이트가 아직 적용되지 않았습니다." : shareError.message);
+      return;
+    }
+    onShared?.(data || 0);
+    onClose();
+  };
+
+  return (
+    <Sheet title="사랑방에 주제 나누기" onClose={onClose}>
+      <p className="privacy-note"><b>내가 고른 내용만 공개됩니다.</b><span>AI 대화 원문, 선택하지 않은 주제, 다른 문장과 생각은 내 서재에 그대로 남습니다. 공유 뒤 서재에서 고친 내용도 다시 공유하지 않는 한 사랑방에 자동 반영되지 않습니다.</span></p>
+      {loading ? <div className="loading">사랑방 식구를 불러오는 중…</div> : <>
+        <fieldset className="share-picker"><legend>1. 나눌 주제</legend>
+          {!topics.length && <p className="muted">먼저 AI 대화를 정리하거나 질문을 직접 남겨주세요.</p>}
+          {topics.map((topic) => <label className="check-card" key={topic.id}><input type="checkbox" checked={selectedTopics.includes(topic.id)} onChange={() => toggle(selectedTopics, setSelectedTopics, topic.id)} /><span><small>{topic.keyword || "독후감 주제"}</small><b>{topic.title}</b></span></label>)}
+        </fieldset>
+        <fieldset className="share-picker"><legend>2. 보여줄 사람</legend>
+          {!!people.length && <button type="button" className="text-button picker-all" onClick={() => setSelectedPeople(selectedPeople.length === people.length ? [] : people.map((person) => person.id))}>{selectedPeople.length === people.length ? "모두 선택 해제" : "사랑방 식구 모두 선택"}</button>}
+          {!people.length && <p className="muted">아직 함께할 사람이 없습니다. 초대받아 Google로 로그인한 사람이 여기에 표시됩니다.</p>}
+          <div className="people-picker">{people.map((person) => <label className="person-chip" key={person.id}><input type="checkbox" checked={selectedPeople.includes(person.id)} onChange={() => toggle(selectedPeople, setSelectedPeople, person.id)} /><i>{(person.display_name || "독").slice(0, 1)}</i><span>{person.display_name || "독자"}</span></label>)}</div>
+        </fieldset>
+        <label className="field"><span>함께 읽는 사람들에게 · 선택</span><textarea rows="3" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="왜 이 주제를 함께 이야기하고 싶은지 적어보세요." /></label>
+      </>}
+      <ErrorNote>{error}</ErrorNote>
+      <button className="primary wide" disabled={busy || !selectedTopics.length || !selectedPeople.length} onClick={share}>{busy ? "사랑방에 놓는 중…" : `${selectedTopics.length || 0}개 주제를 ${selectedPeople.length || 0}명에게 공유`}</button>
+    </Sheet>
+  );
+}
+
+function SharedQuestionBoard({ bookId, me }) {
+  const [topics, setTopics] = useState([]);
+  const [drafts, setDrafts] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    const { data, error: loadError } = await sb.rpc("shared_topics", { p_book_id: bookId });
+    if (loadError) setError(selectiveSharingError(loadError) ? "이 사랑방은 선택 공유 업데이트가 필요합니다." : loadError.message);
+    else { setTopics(data || []); setError(""); }
+    setLoading(false);
+  }, [bookId]);
+  useEffect(() => { load(); }, [load]);
+
+  const answer = async (topicId) => {
+    const content = (drafts[topicId] || "").trim();
+    if (!content) return;
+    const { error: answerError } = await sb.rpc("add_shared_opinion", { p_topic_id: topicId, p_content: content });
+    if (answerError) setError(answerError.message);
+    else { setDrafts({ ...drafts, [topicId]: "" }); load(); }
+  };
+
+  if (loading) return <div className="loading">공유된 질문을 펼치는 중…</div>;
+  return <section className="question-board shared-questions">
+    <div className="section-title"><div><div className="eyebrow">선택해 건넨 생각</div><h2>함께 읽을 질문</h2></div></div>
+    <ErrorNote>{error}</ErrorNote>
+    {!topics.length && !error && <div className="empty-state small"><span>공유된 질문이 없습니다</span></div>}
+    {topics.map((topic, index) => <article className="question-card" key={topic.id}>
+      <div className="question-number">나눈 주제 {String(index + 1).padStart(2, "0")}{topic.keyword ? ` · ${topic.keyword}` : ""}</div>
+      <h3>{topic.title}</h3>
+      {topic.summary && <p className="rationale">{topic.summary}</p>}
+      {(topic.evidence || []).map((quote) => <blockquote key={quote.id}>“{quote.content}”<small>{quote.page ? `${quote.page}쪽` : "책 속 문장"}</small></blockquote>)}
+      {topic.unresolved && <div className="topic-note unresolved"><b>아직 남은 물음</b><p>{topic.unresolved}</p></div>}
+      {topic.apply_note && <div className="topic-note apply"><b>삶에 이어볼 점</b><p>{topic.apply_note}</p></div>}
+      <div className="answers"><h4>각자의 생각 <span>{(topic.opinions || []).length}</span></h4>{(topic.opinions || []).map((item) => <div className={`answer ${item.user_id === me.id ? "mine" : ""}`} key={item.id}><b>{item.author_name}</b><p>{item.content}</p></div>)}</div>
+      <div className="answer-box"><textarea rows="3" value={drafts[topic.id] || ""} onChange={(event) => setDrafts({ ...drafts, [topic.id]: event.target.value })} placeholder="이 질문에 대한 나의 생각을 남겨보세요." /><button className="primary" onClick={() => answer(topic.id)}>답 남기기</button></div>
+    </article>)}
+  </section>;
+}
+
+function BookView({ book, me, onBack }) {
   const [quotes, setQuotes] = useState([]);
   const [thoughts, setThoughts] = useState([]);
   const [tab, setTab] = useState("records");
   const [adding, setAdding] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const [shareNote, setShareNote] = useState(book.share_note || "");
-  const [shared, setShared] = useState(!!book.shared_at);
+  const [sharedMessage, setSharedMessage] = useState("");
   const [error, setError] = useState("");
   const load = useCallback(async () => {
     const { data, error: quoteError } = await sb.from("quotes").select("*").eq("book_id", book.id).order("created_at");
@@ -575,28 +719,22 @@ function BookView({ book, me, onBack, onShared }) {
     setQuotes(data || []); setThoughts(result.rows);
   }, [book.id]);
   useEffect(() => { load(); }, [load]);
-  const publish = async () => {
-    const { error: updateError } = await sb.from("books").update({ shared_at: new Date().toISOString(), share_note: shareNote.trim() || null }).eq("id", book.id);
-    if (updateError) setError(updateError.message); else { setShared(true); setSharing(false); onShared?.(); }
-  };
-  const copyLink = async () => {
-    await navigator.clipboard.writeText(`${window.location.origin}/#/b/${book.id}`);
-  };
 
   return (
     <main className="page book-page">
       <button className="back-button" onClick={onBack}>← 서재로</button>
       <header className="book-hero">
         <span className="book-cover-mini">{book.cover_url ? <img src={book.cover_url} alt="" /> : <i style={{ background: spineColor(book.title) }}>{book.title}</i>}</span>
-        <div><div className="eyebrow">나의 독서책</div><h1>{book.title}</h1><p>{book.author}</p><button className="text-button" onClick={() => setSharing(true)}>{shared ? "사랑방 소개 수정" : "사랑방에 함께 읽기 제안"}</button>{shared && <button className="text-button share-link" onClick={copyLink}>초대 링크 복사</button>}</div>
+        <div><div className="eyebrow">나의 독서책 · 비공개</div><h1>{book.title}</h1><p>{book.author}</p><button className="text-button share-topic-button" onClick={() => setSharing(true)}>원하는 주제만 사랑방에 나누기</button></div>
       </header>
-      <nav className="tabs"><button className={tab === "records" ? "active" : ""} onClick={() => setTab("records")}>문장과 생각</button><button className={tab === "talk" ? "active" : ""} onClick={() => setTab("talk")}>AI와 생각 나누기</button><button className={tab === "questions" ? "active" : ""} onClick={() => setTab("questions")}>정리한 질문</button></nav>
+      <nav className="tabs"><button className={tab === "records" ? "active" : ""} onClick={() => setTab("records")}>문장과 생각</button><button className={tab === "talk" ? "active" : ""} onClick={() => setTab("talk")}>AI와 생각 나누기</button><button className={tab === "questions" ? "active" : ""} onClick={() => setTab("questions")}>나의 독후감</button></nav>
       <ErrorNote>{error}</ErrorNote>
+      {sharedMessage && <div className="notice success">{sharedMessage}</div>}
       {tab === "records" && <><div className="section-title"><h2>기억한 문장</h2><button className="secondary" onClick={() => setAdding(true)}>문장 담기</button></div>{quotes.map((quote) => <QuoteCard key={quote.id} quote={quote} thoughts={thoughts.filter((thought) => thought.quote_id === quote.id)} onReload={load} />)}{!quotes.length && <div className="empty-state small"><span>첫 문장을 기다리고 있어요</span></div>}</>}
       {tab === "talk" && <Talk book={book} quotes={quotes} me={me} onOrganized={() => setTab("questions")} />}
       {tab === "questions" && <QuestionBoard bookId={book.id} me={me} canAsk />}
       {adding && <QuoteEditor book={book} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
-      {sharing && <Sheet title="사랑방에 책 내어놓기" onClose={() => setSharing(false)}><p className="sheet-copy">표지가 사랑방에 전시되고, 질문과 답을 함께 발전시킬 수 있습니다. 개인 AI 대화와 비공개 생각은 공개되지 않습니다.</p><label className="field"><span>함께 읽는 사람들에게</span><textarea rows="4" value={shareNote} onChange={(event) => setShareNote(event.target.value)} placeholder="함께 이야기하고 싶은 이유를 적어주세요." /></label><button className="primary wide" onClick={publish}>사랑방에 내어놓기</button></Sheet>}
+      {sharing && <ShareTopicsSheet book={book} onClose={() => setSharing(false)} onShared={(count) => setSharedMessage(`${count}명에게 선택한 주제를 건넸습니다. 사랑방에는 이 책의 표지와 선택한 내용만 보입니다.`)} />}
     </main>
   );
 }
@@ -606,41 +744,37 @@ function Sarangbang({ onOpen }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    const { data, error: roomError } = await sb.rpc("sarangbang");
-    if (roomError) setError(roomError.message); else setRows(data || []);
+    const { data, error: roomError } = await sb.rpc("my_sarangbang");
+    if (roomError) setError(selectiveSharingError(roomError) ? "사랑방 선택 공유 업데이트가 아직 적용되지 않았습니다." : roomError.message); else setRows(data || []);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
   return (
     <main className="page rooms-page">
       <header className="page-header"><div><div className="eyebrow">함께 읽고 다르게 생각하는 곳</div><h1>사랑방</h1></div><span className="room-seal">舍</span></header>
-      <p className="room-lead">책의 얼굴을 마주 보고, 질문의 근거와 각자의 답을 한자리에 모읍니다.</p>
+      <p className="room-lead">나에게 건네진 책과 질문만 머무는 초대형 공간입니다.</p>
       <ErrorNote>{error}</ErrorNote>
-      {loading ? <div className="loading">사랑방 문을 여는 중…</div> : rows.length ? <div className="display-shelf">{rows.map((row) => <CoverCard key={row.id} book={row} onClick={() => onOpen(row.id)} meta={`${row.owner_name} · 질문 ${row.topic_count || 0} · 답 ${row.opinion_count || 0}`} />)}</div> : <div className="empty-state"><span>아직 전시된 책이 없습니다</span><p>서재의 책에서 ‘사랑방에 함께 읽기 제안’을 눌러보세요.</p></div>}
+      {loading ? <div className="loading">사랑방 문을 여는 중…</div> : rows.length ? <div className="display-shelf">{rows.map((row) => <CoverCard key={row.id} book={row} onClick={() => onOpen(row.id)} meta={`${row.is_mine ? "내가 나눔" : `${row.owner_name}님`} · 공유된 질문 ${row.topic_count || 0}`} />)}</div> : <div className="empty-state"><span>아직 건네진 책이 없습니다</span><p>서재에서 주제와 사람을 골라 나누면 이곳에 책 표지가 놓입니다.</p></div>}
     </main>
   );
 }
 
 function SharedBook({ bookId, me, onBack }) {
   const [book, setBook] = useState(null);
-  const [quotes, setQuotes] = useState([]);
-  const [tab, setTab] = useState("questions");
   const [error, setError] = useState("");
   useEffect(() => { (async () => {
-    const { data, error: infoError } = await sb.rpc("open_shared_book", { b_id: bookId });
-    if (infoError) { setError(infoError.message); return; }
-    const info = data?.[0]; setBook(info);
-    const { data: quoteRows } = await sb.from("quotes").select("*").eq("book_id", bookId).order("created_at");
-    setQuotes(quoteRows || []);
+    const { data, error: infoError } = await sb.rpc("open_selective_shared_book", { p_book_id: bookId });
+    if (infoError) { setError(selectiveSharingError(infoError) ? "이 책은 현재 나에게 공유되어 있지 않거나 선택 공유 업데이트가 필요합니다." : infoError.message); return; }
+    if (!data?.[0]) setError("이 책의 주제를 공유받은 사람만 들어올 수 있습니다.");
+    else setBook(data[0]);
   })(); }, [bookId]);
   if (error) return <main className="page"><button className="back-button" onClick={onBack}>← 사랑방으로</button><ErrorNote>{error}</ErrorNote></main>;
   if (!book) return <main className="page"><div className="loading">책을 펼치는 중…</div></main>;
   return (
     <main className="page shared-book-page">
       <button className="back-button" onClick={onBack}>← 사랑방으로</button>
-      <header className="shared-hero"><span>{book.cover_url ? <img src={book.cover_url} alt="" /> : <i style={{ background: spineColor(book.title) }}>{book.title}</i>}</span><div><div className="eyebrow">{book.owner_name}님이 내어놓은 책</div><h1>{book.title}</h1><p>{book.author}</p>{book.share_note && <blockquote>{book.share_note}</blockquote>}</div></header>
-      <nav className="tabs"><button className={tab === "questions" ? "active" : ""} onClick={() => setTab("questions")}>질문과 답</button><button className={tab === "talk" ? "active" : ""} onClick={() => setTab("talk")}>공동 AI 대화</button></nav>
-      {tab === "questions" ? <QuestionBoard bookId={bookId} me={me} canAsk /> : <Talk book={{ ...book, id: bookId }} quotes={quotes} me={me} shared />}
+      <header className="shared-hero"><span>{book.cover_url ? <img src={book.cover_url} alt="" /> : <i style={{ background: spineColor(book.title) }}>{book.title}</i>}</span><div><div className="eyebrow">{book.is_mine ? "내가 사랑방에 나눈 책" : `${book.owner_name}님이 나에게 건넨 책`}</div><h1>{book.title}</h1><p>{book.author}</p>{book.share_note && <blockquote>{book.share_note}</blockquote>}</div></header>
+      <SharedQuestionBoard bookId={bookId} me={me} />
     </main>
   );
 }
@@ -662,8 +796,10 @@ export function App() {
   const [tab, setTab] = useState("home");
   const [route, setRoute] = useState(null);
   const loadMe = useCallback(async (userId) => {
-    const [{ data: profile }, { data: member }] = await Promise.all([sb.from("profiles").select("*").eq("id", userId).single(), sb.rpc("is_member")]);
-    setMe({ id: userId, name: profile?.display_name || null, member: !!member, shelfPublic: !!profile?.shelf_public });
+    const [profileResult, memberResult] = await Promise.all([sb.from("profiles").select("*").eq("id", userId).single(), sb.rpc("is_member")]);
+    const member = !!memberResult.data;
+    if (member) await sb.rpc("register_reading_circle_member");
+    setMe({ id: userId, name: profileResult.data?.display_name || null, member, shelfPublic: !!profileResult.data?.shelf_public });
   }, []);
   useEffect(() => {
     sb.auth.getSession().then(({ data }) => setSession(data.session));
@@ -690,12 +826,13 @@ export function App() {
   if (session === undefined) return null;
   if (!session) return <Auth />;
   if (!me) return <div className="loading fullscreen">서재를 여는 중…</div>;
+  if (!me.member) return <InviteOnly />;
   if (!me.name) return <Nickname userId={me.id} onDone={() => loadMe(me.id)} />;
 
   let content;
   if (route?.type === "book") content = <BookView book={route.book} me={me} onBack={closeRoute} />;
   else if (route?.type === "shared") content = <SharedBook bookId={route.id} me={me} onBack={closeRoute} />;
-  else if (tab === "home") content = <Home me={me} onOpenBook={(book) => book && setRoute({ type: "book", book })} onGoLibrary={() => setTab("library")} onGoRooms={() => setTab("rooms")} />;
+  else if (tab === "home") content = <Home me={me} onOpenBook={(book) => book && setRoute({ type: "book", book })} onOpenShared={openShared} onGoLibrary={() => setTab("library")} onGoRooms={() => setTab("rooms")} />;
   else if (tab === "library") content = <Library me={me} onOpenBook={(book) => setRoute({ type: "book", book })} />;
   else content = <Sarangbang onOpen={openShared} />;
 
