@@ -7,7 +7,8 @@
 
 // ── 모델 ──────────────────────────────────────────────
 // 모델을 바꾸려면 OPENAI_MODEL 환경 변수를 설정합니다.
-const ENDPOINT = "https://api.openai.com/v1/chat/completions";
+const CHAT_ENDPOINT = "https://api.openai.com/v1/chat/completions";
+const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses";
 const DEFAULT_SUPABASE_URL = "https://whyoeekvnvqtsgqmlywj.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoeW9lZWt2bnZxdHNncW1seXdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NjM1NDAsImV4cCI6MjEwMjQzOTU0MH0.mYIrGDbzNo_4Rg_lEKU5cI4YJXyuQtDoQYRC5j1M47U";
 const windows = new Map();
@@ -87,15 +88,46 @@ const ORGANIZE_SYSTEM = `당신은 독서 대화를 몇 달 뒤에 다시 읽을
 async function openai(messages, json = false) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY가 설정되지 않았습니다.");
+  const model = process.env.OPENAI_MODEL || "gpt-5-mini";
+
+  if (!json) {
+    const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
+    const input = messages.filter((message) => message.role !== "system").map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+    const requestId = crypto.randomUUID();
+    const r = await fetch(RESPONSES_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${key}`,
+        "X-Client-Request-Id": requestId,
+      },
+      body: JSON.stringify({ model, instructions: system, input, max_output_tokens: 4096, store: false }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error?.message || `OpenAI 호출 실패 (${requestId})`);
+
+    const text = String(d?.output_text || d?.output?.flatMap((item) => item.content || [])
+      .filter((item) => item.type === "output_text").map((item) => item.text).join("\n") || "").trim();
+    if (!text) {
+      const reason = d?.incomplete_details?.reason;
+      throw new Error(reason === "max_output_tokens"
+        ? "AI가 생각을 마치기 전에 출력 한도에 도달했습니다. 다시 시도해 주세요."
+        : `AI 응답 본문이 비어 있습니다. 다시 시도해 주세요. (${requestId})`);
+    }
+    return text;
+  }
 
   const body = {
-    model: process.env.OPENAI_MODEL || "gpt-5-mini",
+    model,
     messages,
-    max_completion_tokens: json ? 4096 : 1024,
-    ...(json ? { response_format: { type: "json_object" } } : {})
+    max_completion_tokens: 8192,
+    response_format: { type: "json_object" },
   };
 
-  const r = await fetch(ENDPOINT, {
+  const r = await fetch(CHAT_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -107,7 +139,7 @@ async function openai(messages, json = false) {
   const d = await r.json();
   if (!r.ok) throw new Error(d?.error?.message || "OpenAI 호출 실패");
 
-  const text = (d?.choices?.[0]?.message?.content || "").trim();
+  const text = String(d?.choices?.[0]?.message?.content || "").trim();
   if (!text) throw new Error("빈 응답을 받았습니다. 다시 시도해 주세요.");
   return text;
 }
