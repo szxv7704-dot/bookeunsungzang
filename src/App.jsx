@@ -8,9 +8,9 @@ const OPENING_QUOTE_SESSION_KEY = "bookeunsungzang_opening_quote";
 const LAST_OPENING_QUOTE_KEY = "bookeunsungzang_last_opening_quote";
 
 const SHELF_ARTWORKS = [
-  { src: "/gallery/yellow-garden.webp", title: "볕이 머문 자리", alt: "짙은 청록 하늘 아래 노란 꽃과 돌담을 그린 인상주의풍 회화" },
-  { src: "/gallery/blush-mountains.webp", title: "분홍빛 설산", alt: "분홍빛 새벽 하늘과 푸른 계곡의 설산을 그린 인상주의풍 회화" },
-  { src: "/gallery/coastal-reading.webp", title: "독서 후의 정원", alt: "노란 꽃과 푸른 바다가 보이는 햇빛 가득한 정원을 그린 인상주의풍 회화" },
+  { shelf: 1, insertAt: 1, placement: "artwork-large artwork-low", src: "/gallery/yellow-garden.webp", title: "볕이 머문 자리", alt: "짙은 청록 하늘 아래 노란 꽃과 돌담을 그린 인상주의풍 회화" },
+  { shelf: 4, insertAt: 4, placement: "artwork-small artwork-high", src: "/gallery/blush-mountains.webp", title: "분홍빛 설산", alt: "분홍빛 새벽 하늘과 푸른 계곡의 설산을 그린 인상주의풍 회화" },
+  { shelf: 7, insertAt: 0, placement: "artwork-medium artwork-mid", src: "/gallery/coastal-reading.webp", title: "독서 후의 정원", alt: "노란 꽃과 푸른 바다가 보이는 햇빛 가득한 정원을 그린 인상주의풍 회화" },
 ];
 
 const LIBRARY_CLASSES = [
@@ -411,7 +411,7 @@ function AddBook({ onClose, onAdded, initialClassification = "" }) {
 
 function ShelfArtwork({ artwork }) {
   return (
-    <figure className="shelf-artwork">
+    <figure className={`shelf-artwork ${artwork.placement}`}>
       <span><img src={artwork.src} alt={artwork.alt} /></span>
       <figcaption><b>{artwork.title}</b><small>책은성장 소장작</small></figcaption>
     </figure>
@@ -477,14 +477,19 @@ function Library({ me, onOpenBook }) {
         <>
           <section className="reading-map"><div className="reading-map-copy"><span>나의 독서 지도</span><b>{books.length}권이 만든 관심의 모양</b><small>분류별로 얼마나 읽었는지 한눈에 살펴보세요.</small></div><div className="reading-map-bars">{LIBRARY_CLASSES.map((item) => { const count = groupedBooks.groups[item.code].length; return <button key={item.code} onClick={() => document.getElementById(`shelf-${item.code}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} title={`${item.name} ${count}권`}><span>{item.code}</span><i><u style={{ height: `${Math.max(count ? 18 : 4, (count / maxCategoryCount) * 100)}%` }} /></i><b>{count}</b></button>; })}</div></section>
           {!books.length && <section className="library-invitation"><span>열 개의 서가가 첫 책을 기다립니다.</span><button className="primary" onClick={() => openAddBook()}>첫 책 꽂기</button></section>}
-          <div className="library-cabinet">{LIBRARY_CLASSES.map((item, index) => {
+          <div className="library-cabinet">
+            <span className="library-flora flora-one" aria-hidden="true" />
+            <span className="library-flora flora-two" aria-hidden="true" />
+            <span className="library-flora flora-three" aria-hidden="true" />
+            <span className="library-flora flora-four" aria-hidden="true" />
+            <span className="library-flora flora-five" aria-hidden="true" />
+            {LIBRARY_CLASSES.map((item, index) => {
             const shelfBooks = groupedBooks.groups[item.code];
-            const emptySlots = Math.max(3, 7 - Math.min(shelfBooks.length, 4));
-            const artworkIndex = [1, 4, 7].indexOf(index);
-            const artwork = artworkIndex >= 0 ? SHELF_ARTWORKS[artworkIndex] : null;
+            const emptySlots = Math.max(3, 6 - Math.min(shelfBooks.length, 3));
+            const artwork = SHELF_ARTWORKS.find((candidate) => candidate.shelf === index);
             const bookElements = shelfBooks.map(renderLibraryBook);
-            if (artwork) bookElements.splice(Math.min(1, bookElements.length), 0, <ShelfArtwork artwork={artwork} key={`art-${item.code}`} />);
-            return <section className={`classification-shelf tone-${index % 5}`} id={`shelf-${item.code}`} key={item.code}><header className="shelf-label"><span>{item.range}</span><div><b>{item.name}</b><small>{item.note}</small></div><em>{shelfBooks.length}권</em></header><div className="classified-books">{bookElements}{Array.from({ length: emptySlots }, (_, slot) => <span className={`empty-book-slot empty-book-${slot % 4}`} key={slot} />)}<button className="shelf-add" onClick={() => openAddBook(item.code)} aria-label={`${item.name} 서가에 책 추가`}>＋</button></div><div className="shelf-board" /></section>;
+            if (artwork) bookElements.splice(Math.min(artwork.insertAt, bookElements.length), 0, <ShelfArtwork artwork={artwork} key={`art-${item.code}`} />);
+            return <section className={`classification-shelf tone-${index % 5} shelf-layout-${index % 4}`} id={`shelf-${item.code}`} key={item.code}><header className="shelf-label" aria-label={`${item.range} ${item.name}, ${shelfBooks.length}권`}><b>{item.name}</b></header><div className="classified-books">{bookElements}{Array.from({ length: emptySlots }, (_, slot) => <span className={`empty-book-slot empty-book-${slot % 4}`} key={slot} />)}<button className="shelf-add" onClick={() => openAddBook(item.code)} aria-label={`${item.name} 서가에 책 추가`}>＋</button></div><div className="shelf-board" /></section>;
           })}</div>
           {!!groupedBooks.pending.length && <section className="pending-shelf"><div><span>분류 대기</span><b>기존 책 {groupedBooks.pending.length}권</b><small>책을 열어 분야를 정하면 알맞은 서가로 옮겨집니다.</small></div><div className="pending-books">{groupedBooks.pending.map(renderLibraryBook)}</div></section>}
           <p className="shelf-caption">내가 쓴 생각이 쌓일수록 책등이 두꺼워지고, 비어 있던 장서실은 나만의 책으로 채워집니다.</p>
