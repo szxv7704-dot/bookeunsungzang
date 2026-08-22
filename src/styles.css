@@ -175,6 +175,10 @@ input:focus, textarea:focus, select:focus { border-color: var(--jade); }
 .message p { margin: 0; padding: 12px 14px; border-radius: 10px; line-height: 1.75; white-space: pre-wrap; }
 .message.human p { background: #e7dfcf; }
 .message.ai p { border: 1px solid var(--line); background: var(--card); }
+.organize-callout { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center; margin: 26px 0 18px; padding: 20px 22px; border: 1px solid #c8b38d; border-left: 5px solid var(--brass); background: linear-gradient(110deg, #fffaf0, #f3ead9); }
+.organize-callout b { font: 700 16px var(--serif); }
+.organize-callout p { max-width: 570px; margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.organize-callout button { white-space: nowrap; }
 .composer { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; position: relative; margin-top: 18px; padding: 12px; border: 1px solid var(--line); border-top: 3px solid var(--jade); border-radius: 4px; background: var(--card); }
 .composer textarea { min-width: 0; }
 .ai-retry { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px 0 0; padding: 13px 14px; border: 1px solid #dcc5a1; border-left: 4px solid var(--brass); background: #fff9ed; }
@@ -186,6 +190,11 @@ input:focus, textarea:focus, select:focus { border-color: var(--jade); }
 .rationale { color: #5b574f; line-height: 1.75; }
 .question-card blockquote { margin: 18px 0; padding: 13px 15px; border-left: 2px solid var(--seal); background: #f4ede1; font: 15px/1.8 var(--serif); }
 .question-card blockquote small { display: block; margin-top: 7px; color: var(--muted); font: 10px var(--sans); }
+.topic-note { margin: 12px 0; padding: 13px 15px; border-left: 3px solid var(--brass); background: #faf2e3; }
+.topic-note.apply { border-left-color: var(--jade); background: #eaf1ed; }
+.topic-note b { color: var(--seal); font-size: 11px; }
+.topic-note.apply b { color: var(--jade); }
+.topic-note p { margin: 5px 0 0; font-size: 13px; line-height: 1.7; }
 .answers { margin-top: 25px; padding-top: 18px; border-top: 1px solid var(--line); }
 .answers h4 { margin: 0 0 12px; font-size: 13px; }
 .answers h4 span { color: var(--seal); }
@@ -257,6 +266,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--jade); }
   .answer-box button { width: 100%; }
   .composer { grid-template-columns: 1fr; }
   .composer button { width: 100%; }
+  .organize-callout { grid-template-columns: 1fr; }
+  .organize-callout button { width: 100%; }
   .ai-retry { align-items: stretch; flex-direction: column; }
   .ai-retry button { width: 100%; }
 }

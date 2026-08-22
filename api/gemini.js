@@ -7,7 +7,6 @@
 
 // ── 모델 ──────────────────────────────────────────────
 // 모델을 바꾸려면 OPENAI_MODEL 환경 변수를 설정합니다.
-const CHAT_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses";
 const DEFAULT_SUPABASE_URL = "https://whyoeekvnvqtsgqmlywj.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoeW9lZWt2bnZxdHNncW1seXdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NjM1NDAsImV4cCI6MjEwMjQzOTU0MH0.mYIrGDbzNo_4Rg_lEKU5cI4YJXyuQtDoQYRC5j1M47U";
@@ -64,8 +63,8 @@ const ORGANIZE_SYSTEM = `당신은 독서 대화를 몇 달 뒤에 다시 읽을
 
 각 주제에 담을 것:
 - keyword: 그 주제의 핵심어. 한두 단어. (예: "눈", "기억과 증언")
-- title: 그 키워드를 두고 무엇을 이야기했는지 한 줄로. 키워드를 되풀이하지 말고 내용을 담으십시오.
-  나쁜 예: "눈에 대하여"  좋은 예: "덮는 것이자 보존하는 것으로서의 눈"
+- title: 사랑방에서 다른 독자에게 건넬 **질문 한 문장**. 대화에서 실제로 생겨난 쟁점을 묻고, 반드시 물음표로 끝냅니다.
+  나쁜 예: "눈에 대하여"  좋은 예: "눈은 기억을 덮는가, 오히려 보존하는가?"
 - summary: **생각이 어떻게 움직였는지**를 씁니다. 결론만 적지 마십시오.
   처음에 어떻게 봤고, 무엇 때문에 달라졌고, 지금은 어디에 있는지. 2~5문장.
   생각이 움직이지 않았다면 억지로 지어내지 말고 그 자리에서 무엇을 붙들었는지 쓰십시오.
@@ -85,62 +84,80 @@ const ORGANIZE_SYSTEM = `당신은 독서 대화를 몇 달 뒤에 다시 읽을
 반드시 아래 형태의 JSON 객체만 출력하십시오.
 {"topics":[{"keyword":"","title":"","summary":"","quote_ids":[],"opinions":[{"author_name":"","content":""}],"unresolved":null,"apply_note":null}]}`;
 
+const TOPICS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["topics"],
+  properties: {
+    topics: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["keyword", "title", "summary", "quote_ids", "opinions", "unresolved", "apply_note"],
+        properties: {
+          keyword: { type: "string" },
+          title: { type: "string" },
+          summary: { type: "string" },
+          quote_ids: { type: "array", items: { type: "string" } },
+          opinions: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["author_name", "content"],
+              properties: { author_name: { type: "string" }, content: { type: "string" } },
+            },
+          },
+          unresolved: { type: ["string", "null"] },
+          apply_note: { type: ["string", "null"] },
+        },
+      },
+    },
+  },
+};
+
 async function openai(messages, json = false) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY가 설정되지 않았습니다.");
   const model = process.env.OPENAI_MODEL || "gpt-5-mini";
 
-  if (!json) {
-    const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
-    const input = messages.filter((message) => message.role !== "system").map((message) => ({
-      role: message.role,
-      content: message.content,
-    }));
-    const requestId = crypto.randomUUID();
-    const r = await fetch(RESPONSES_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${key}`,
-        "X-Client-Request-Id": requestId,
-      },
-      body: JSON.stringify({ model, instructions: system, input, max_output_tokens: 4096, store: false }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d?.error?.message || `OpenAI 호출 실패 (${requestId})`);
-
-    const text = String(d?.output_text || d?.output?.flatMap((item) => item.content || [])
-      .filter((item) => item.type === "output_text").map((item) => item.text).join("\n") || "").trim();
-    if (!text) {
-      const reason = d?.incomplete_details?.reason;
-      throw new Error(reason === "max_output_tokens"
-        ? "AI가 생각을 마치기 전에 출력 한도에 도달했습니다. 다시 시도해 주세요."
-        : `AI 응답 본문이 비어 있습니다. 다시 시도해 주세요. (${requestId})`);
-    }
-    return text;
-  }
-
+  const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
+  const input = messages.filter((message) => message.role !== "system").map((message) => ({
+    role: message.role,
+    content: message.content,
+  }));
+  const requestId = crypto.randomUUID();
   const body = {
     model,
-    messages,
-    max_completion_tokens: 8192,
-    response_format: { type: "json_object" },
+    instructions: system,
+    input,
+    // 짧은 독서 대화에서도 추론 토큰이 본문을 밀어내 빈 응답처럼 보이지 않도록
+    // 낮은 추론 강도와 충분한 출력 여유를 함께 둡니다.
+    reasoning: { effort: "low" },
+    max_output_tokens: 8192,
+    store: false,
+    ...(json ? { text: { format: { type: "json_schema", name: "reading_topics", strict: true, schema: TOPICS_SCHEMA } } } : {}),
   };
-
-  const r = await fetch(CHAT_ENDPOINT, {
+  const r = await fetch(RESPONSES_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${key}`
+      "Authorization": `Bearer ${key}`,
+      "X-Client-Request-Id": requestId,
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
-
   const d = await r.json();
-  if (!r.ok) throw new Error(d?.error?.message || "OpenAI 호출 실패");
-
-  const text = String(d?.choices?.[0]?.message?.content || "").trim();
-  if (!text) throw new Error("빈 응답을 받았습니다. 다시 시도해 주세요.");
+  if (!r.ok) throw new Error(d?.error?.message || `OpenAI 호출 실패 (${requestId})`);
+  const text = String(d?.output_text || d?.output?.flatMap((item) => item.content || [])
+    .filter((item) => item.type === "output_text").map((item) => item.text).join("\n") || "").trim();
+  if (!text) {
+    const reason = d?.incomplete_details?.reason;
+    throw new Error(reason === "max_output_tokens"
+      ? "AI가 생각을 마치기 전에 출력 한도에 도달했습니다. 다시 시도해 주세요."
+      : `AI 응답 본문이 비어 있습니다. 다시 시도해 주세요. (${requestId})`);
+  }
   return text;
 }
 
