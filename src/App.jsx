@@ -4,6 +4,14 @@ import { callAI, formatDate, isMissingRelation, relativeDays, sb, spineColor } f
 const ADMIN_EMAIL = "szxv7704@gmail.com";
 const INVITE_TOKEN_KEY = "bookeunsungzang_invite_token";
 const LOCAL_CLASSIFICATION_KEY = "bookeunsungzang_local_classifications";
+const OPENING_QUOTE_SESSION_KEY = "bookeunsungzang_opening_quote";
+const LAST_OPENING_QUOTE_KEY = "bookeunsungzang_last_opening_quote";
+
+const SHELF_ARTWORKS = [
+  { src: "/gallery/yellow-garden.webp", title: "볕이 머문 자리", alt: "짙은 청록 하늘 아래 노란 꽃과 돌담을 그린 인상주의풍 회화" },
+  { src: "/gallery/blush-mountains.webp", title: "분홍빛 설산", alt: "분홍빛 새벽 하늘과 푸른 계곡의 설산을 그린 인상주의풍 회화" },
+  { src: "/gallery/coastal-reading.webp", title: "독서 후의 정원", alt: "노란 꽃과 푸른 바다가 보이는 햇빛 가득한 정원을 그린 인상주의풍 회화" },
+];
 
 const LIBRARY_CLASSES = [
   { code: "000", range: "000–099", name: "총류", note: "지식·정보·컴퓨터" },
@@ -55,6 +63,33 @@ function saveLocalClassification(bookId, code) {
   if (code) values[bookId] = code; else delete values[bookId];
   try { window.localStorage.setItem(LOCAL_CLASSIFICATION_KEY, JSON.stringify(values)); } catch { /* 로컬 저장소 미지원 */ }
   return values;
+}
+
+function chooseOpeningQuote(quotes, userId) {
+  if (!quotes.length) return null;
+  const sessionKey = `${OPENING_QUOTE_SESSION_KEY}:${userId}`;
+  const lastKey = `${LAST_OPENING_QUOTE_KEY}:${userId}`;
+  try {
+    const selectedId = window.sessionStorage.getItem(sessionKey);
+    const selected = quotes.find((quote) => quote.id === selectedId);
+    if (selected) return selected;
+
+    const older = quotes.filter((quote) => Date.now() - new Date(quote.created_at).getTime() >= 7 * 86400000);
+    const pool = older.length ? older : quotes;
+    const lastId = window.localStorage.getItem(lastKey);
+    const freshPool = pool.length > 1 ? pool.filter((quote) => quote.id !== lastId) : pool;
+    const chosen = freshPool[Math.floor(Math.random() * freshPool.length)];
+    window.sessionStorage.setItem(sessionKey, chosen.id);
+    window.localStorage.setItem(lastKey, chosen.id);
+    return chosen;
+  } catch {
+    return quotes[Math.floor(Math.random() * quotes.length)];
+  }
+}
+
+function bookSpineHeight(title = "") {
+  const seed = [...title].reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  return 154 + (seed % 34);
 }
 
 function pendingInviteToken() {
@@ -292,13 +327,7 @@ function Home({ me, onOpenBook, onOpenShared, onManageInvites, onGoLibrary }) {
   useEffect(() => { load(); }, [load]);
 
   const bookMap = useMemo(() => Object.fromEntries(data.books.map((book) => [book.id, book])), [data.books]);
-  const daily = useMemo(() => {
-    if (!data.quotes.length) return null;
-    const older = data.quotes.filter((quote) => Date.now() - new Date(quote.created_at).getTime() >= 7 * 86400000);
-    const pool = older.length ? older : data.quotes;
-    const day = Math.floor(Date.now() / 86400000);
-    return pool[day % pool.length];
-  }, [data.quotes]);
+  const daily = useMemo(() => chooseOpeningQuote(data.quotes, me.id), [data.quotes, me.id]);
   const dailyThoughts = daily ? data.thoughts.filter((thought) => thought.quote_id === daily.id) : [];
 
   return (
@@ -380,6 +409,15 @@ function AddBook({ onClose, onAdded, initialClassification = "" }) {
   );
 }
 
+function ShelfArtwork({ artwork }) {
+  return (
+    <figure className="shelf-artwork">
+      <span><img src={artwork.src} alt={artwork.alt} /></span>
+      <figcaption><b>{artwork.title}</b><small>책은성장 소장작</small></figcaption>
+    </figure>
+  );
+}
+
 function Library({ me, onOpenBook }) {
   const [books, setBooks] = useState([]);
   const [quotes, setQuotes] = useState([]);
@@ -420,11 +458,14 @@ function Library({ me, onOpenBook }) {
 
   const renderLibraryBook = (book) => {
     const chars = writtenByBook[book.id] || 0;
-    const depth = Math.min(11, 2 + Math.sqrt(chars) * .16);
+    const width = Math.min(72, 25 + Math.log2(chars + 1) * 4.2);
+    const height = bookSpineHeight(book.title);
     const effectiveBook = { ...book, classification_code: book.classification_code || localClassifications[book.id] || null };
-    return <button className="library-book" key={book.id} style={{ "--book-depth": `${depth}px` }} onClick={() => onOpenBook(effectiveBook)} title={`${book.title} · 내가 쓴 글 ${chars.toLocaleString()}자`}>
-      <span className="library-book-frame">{book.cover_url ? <img src={book.cover_url} alt={`《${book.title}》 표지`} /> : <i style={{ background: spineColor(book.title) }}>{book.title}</i>}</span>
-      <span className="library-book-label"><strong>{book.title}</strong><small>{book.author || "저자 미상"}</small></span>
+    return <button className="library-book" key={book.id} style={{ "--book-width": `${width}px`, "--book-height": `${height}px`, "--spine-color": spineColor(book.title) }} onClick={() => onOpenBook(effectiveBook)} title={`${book.title} · 내가 쓴 생각 ${chars.toLocaleString()}자`}>
+      {book.cover_url && <img className="library-book-cover" src={book.cover_url} alt="" />}
+      <span className="library-book-wash" />
+      <strong>{book.title}</strong>
+      <small>{book.author || "저자 미상"}</small>
     </button>;
   };
 
@@ -432,14 +473,23 @@ function Library({ me, onOpenBook }) {
     <main className="page library-page">
       <header className="page-header"><div><div className="eyebrow">000부터 999까지, 생각이 자라는 서가</div><h1>서재</h1></div><button className="round-button" onClick={() => openAddBook()} aria-label="책 추가">＋</button></header>
       <ErrorNote>{error}</ErrorNote>
-      {loading ? <div className="loading">책장을 여는 중…</div> : books.length ? (
+      {loading ? <div className="loading">책장을 여는 중…</div> : (
         <>
           <section className="reading-map"><div className="reading-map-copy"><span>나의 독서 지도</span><b>{books.length}권이 만든 관심의 모양</b><small>분류별로 얼마나 읽었는지 한눈에 살펴보세요.</small></div><div className="reading-map-bars">{LIBRARY_CLASSES.map((item) => { const count = groupedBooks.groups[item.code].length; return <button key={item.code} onClick={() => document.getElementById(`shelf-${item.code}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} title={`${item.name} ${count}권`}><span>{item.code}</span><i><u style={{ height: `${Math.max(count ? 18 : 4, (count / maxCategoryCount) * 100)}%` }} /></i><b>{count}</b></button>; })}</div></section>
-          <div className="library-cabinet">{LIBRARY_CLASSES.map((item, index) => { const shelfBooks = groupedBooks.groups[item.code]; const emptySlots = Math.max(2, 5 - Math.min(shelfBooks.length, 3)); return <section className={`classification-shelf tone-${index % 5}`} id={`shelf-${item.code}`} key={item.code}><header className="shelf-label"><span>{item.range}</span><div><b>{item.name}</b><small>{item.note}</small></div><em>{shelfBooks.length}권</em></header><div className="classified-books">{shelfBooks.map(renderLibraryBook)}{Array.from({ length: emptySlots }, (_, slot) => <span className="empty-book-slot" key={slot} />)}<button className="shelf-add" onClick={() => openAddBook(item.code)} aria-label={`${item.name} 서가에 책 추가`}>＋</button></div><div className="shelf-board" /></section>; })}</div>
+          {!books.length && <section className="library-invitation"><span>열 개의 서가가 첫 책을 기다립니다.</span><button className="primary" onClick={() => openAddBook()}>첫 책 꽂기</button></section>}
+          <div className="library-cabinet">{LIBRARY_CLASSES.map((item, index) => {
+            const shelfBooks = groupedBooks.groups[item.code];
+            const emptySlots = Math.max(3, 7 - Math.min(shelfBooks.length, 4));
+            const artworkIndex = [1, 4, 7].indexOf(index);
+            const artwork = artworkIndex >= 0 ? SHELF_ARTWORKS[artworkIndex] : null;
+            const bookElements = shelfBooks.map(renderLibraryBook);
+            if (artwork) bookElements.splice(Math.min(1, bookElements.length), 0, <ShelfArtwork artwork={artwork} key={`art-${item.code}`} />);
+            return <section className={`classification-shelf tone-${index % 5}`} id={`shelf-${item.code}`} key={item.code}><header className="shelf-label"><span>{item.range}</span><div><b>{item.name}</b><small>{item.note}</small></div><em>{shelfBooks.length}권</em></header><div className="classified-books">{bookElements}{Array.from({ length: emptySlots }, (_, slot) => <span className={`empty-book-slot empty-book-${slot % 4}`} key={slot} />)}<button className="shelf-add" onClick={() => openAddBook(item.code)} aria-label={`${item.name} 서가에 책 추가`}>＋</button></div><div className="shelf-board" /></section>;
+          })}</div>
           {!!groupedBooks.pending.length && <section className="pending-shelf"><div><span>분류 대기</span><b>기존 책 {groupedBooks.pending.length}권</b><small>책을 열어 분야를 정하면 알맞은 서가로 옮겨집니다.</small></div><div className="pending-books">{groupedBooks.pending.map(renderLibraryBook)}</div></section>}
-          <p className="shelf-caption">내가 쓴 생각이 쌓일수록 전시된 책의 깊이가 더해지고, 많이 읽은 분야의 서가는 풍성해집니다.</p>
+          <p className="shelf-caption">내가 쓴 생각이 쌓일수록 책등이 두꺼워지고, 비어 있던 장서실은 나만의 책으로 채워집니다.</p>
         </>
-      ) : <section className="empty-library"><div className="empty-library-light"><span>열 개의 서가가 첫 책을 기다립니다</span><p>000 총류부터 900 역사까지, 읽고 싶은 분야의 빈 칸을 하나씩 채워보세요.</p><button className="primary" onClick={() => openAddBook()}>첫 책 꽂기</button></div>{LIBRARY_CLASSES.map((item) => <div className="empty-class-row" key={item.code}><b>{item.code}</b><span>{item.name}</span><i /></div>)}</section>}
+      )}
       {adding && <AddBook initialClassification={adding.code} onClose={() => setAdding(null)} onAdded={() => { setAdding(null); setLocalClassifications(loadLocalClassifications()); load(); }} />}
     </main>
   );
