@@ -28,7 +28,7 @@ function ErrorNote({ children }) {
 function Brand() {
   return (
     <div className="brand">
-      <span className="brand-mark">冊</span>
+      <span className="brand-mark"><img src="/icon-192.png" alt="" /></span>
       <span>책은성장</span>
     </div>
   );
@@ -47,7 +47,7 @@ function Auth({ invited = false }) {
 
   return (
     <main className="auth-page">
-      <div className="auth-seal">冊</div>
+      <div className="auth-seal"><img src="/icon-192.png" alt="책은성장 단청 문양" /></div>
       <h1>책은성장</h1>
       <p>{invited ? <>사랑방 초대장이 도착했습니다.<br />초대받은 Google 계정으로 들어오세요.</> : <>읽은 문장이 질문이 되고,<br />나눈 생각이 한 권의 책이 됩니다.</>}</p>
       <ErrorNote>{error}</ErrorNote>
@@ -221,7 +221,7 @@ function NotificationBell({ me, onOpenShared }) {
   </>;
 }
 
-function Home({ me, onOpenBook, onOpenShared, onManageInvites, onGoLibrary, onGoRooms }) {
+function Home({ me, onOpenBook, onOpenShared, onManageInvites, onGoLibrary }) {
   const [data, setData] = useState({ books: [], quotes: [], thoughts: [], loading: true });
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
@@ -251,10 +251,6 @@ function Home({ me, onOpenBook, onOpenShared, onManageInvites, onGoLibrary, onGo
   return (
     <main className="page home-page">
       <header className="page-header home-head"><Brand /><div className="home-actions">{me.email === ADMIN_EMAIL && <button className="admin-link" onClick={onManageInvites}>초대 관리</button>}<NotificationBell me={me} onOpenShared={onOpenShared} /><button className="profile-link" onClick={() => sb.auth.signOut()} title="로그아웃">{me.name}님의 오늘</button></div></header>
-      <div className="home-intro">
-        <p>읽는 사람의 시간이<br />조용히 깊어지는 곳.</p>
-        <span>PRIVATE READING ROOM · SEOUL</span>
-      </div>
       <ErrorNote>{error}</ErrorNote>
       {data.loading ? <div className="loading">지난 문장을 꺼내는 중…</div> : daily ? (
         <DailyQuote quote={daily} book={bookMap[daily.book_id]} thoughts={dailyThoughts}
@@ -263,16 +259,6 @@ function Home({ me, onOpenBook, onOpenShared, onManageInvites, onGoLibrary, onGo
         <section className="empty-state"><span>첫 문장을 기다리는 서재</span><p>읽다가 마음을 멈춰 세운 문장을 담아보세요.</p><button className="primary" onClick={onGoLibrary}>서재로 가기</button></section>
       )}
 
-      <section className="home-section">
-        <div className="section-title"><h2>이어서 읽기</h2><button onClick={onGoLibrary}>서재 전체 보기</button></div>
-        <div className="continue-row">
-          {data.books.slice(0, 3).map((book) => <CoverCard key={book.id} book={book} onClick={() => onOpenBook(book)} small />)}
-        </div>
-      </section>
-
-      <button className="room-callout" onClick={onGoRooms}>
-        <span className="room-icon">舍</span><span><b>사랑방에 들러보세요</b><small>함께 읽는 책의 질문과 새로운 답을 확인합니다.</small></span><i>→</i>
-      </button>
       {editing && <ThoughtEditor quote={editing.quote} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </main>
   );
@@ -886,12 +872,7 @@ function SharedBook({ bookId, me, onBack }) {
 function DemoApp() {
   const quote = { id: "demo", book_id: "book", content: "사람은 자신이 사랑하는 것에 의해 만들어진다.", page: "127", memo: "무엇을 좋아하는지가 결국 나를 설명해준다는 뜻으로 읽었다.", created_at: "2026-03-12T00:00:00Z" };
   const thoughts = [{ id: "t1", quote_id: "demo", content: "지금은 좋아하는 대상뿐 아니라 그것을 사랑하는 방식도 나를 만든다고 생각한다.", source: "revisit", created_at: "2026-08-22T00:00:00Z" }];
-  const demoBooks = [
-    { id: "b1", title: "모국어는 차라리 침묵", author: "목정원" },
-    { id: "b2", title: "소년이 온다", author: "한강" },
-    { id: "b3", title: "명상록", author: "마르쿠스 아우렐리우스" },
-  ];
-  return <div className="app-shell"><main className="page home-page"><header className="page-header home-head"><Brand /><span>독자님의 오늘</span></header><div className="home-intro"><p>읽는 사람의 시간이<br />조용히 깊어지는 곳.</p><span>PRIVATE READING ROOM · SEOUL</span></div><DailyQuote quote={quote} book={{ title: "모국어는 차라리 침묵" }} thoughts={thoughts} onAppend={() => {}} onOpen={() => {}} /><section className="home-section"><div className="section-title"><h2>이어서 읽기</h2><button>서재 전체 보기</button></div><div className="continue-row">{demoBooks.map((book) => <CoverCard key={book.id} book={book} small />)}</div></section><button className="room-callout"><span className="room-icon">舍</span><span><b>사랑방에 들러보세요</b><small>답변을 기다리는 질문이 2개 있습니다.</small></span><i>→</i></button></main><nav className="bottom-nav"><button className="active">오늘</button><button>서재</button><button>사랑방</button></nav><div className="demo-badge">디자인 미리보기</div></div>;
+  return <div className="app-shell"><main className="page home-page"><header className="page-header home-head"><Brand /><span>독자님의 오늘</span></header><DailyQuote quote={quote} book={{ title: "모국어는 차라리 침묵" }} thoughts={thoughts} onAppend={() => {}} onOpen={() => {}} /></main><nav className="bottom-nav"><button className="active">오늘</button><button>서재</button><button>사랑방</button></nav><div className="demo-badge">디자인 미리보기</div></div>;
 }
 
 export function App() {
@@ -959,7 +940,7 @@ export function App() {
   if (route?.type === "invites") content = <InviteAdmin me={me} onBack={closeRoute} />;
   else if (route?.type === "book") content = <BookView book={route.book} me={me} onBack={closeRoute} />;
   else if (route?.type === "shared") content = <SharedBook bookId={route.id} me={me} onBack={closeRoute} />;
-  else if (tab === "home") content = <Home me={me} onOpenBook={(book) => book && setRoute({ type: "book", book })} onOpenShared={openShared} onManageInvites={() => setRoute({ type: "invites" })} onGoLibrary={() => setTab("library")} onGoRooms={() => setTab("rooms")} />;
+  else if (tab === "home") content = <Home me={me} onOpenBook={(book) => book && setRoute({ type: "book", book })} onOpenShared={openShared} onManageInvites={() => setRoute({ type: "invites" })} onGoLibrary={() => setTab("library")} />;
   else if (tab === "library") content = <Library me={me} onOpenBook={(book) => setRoute({ type: "book", book })} />;
   else content = <Sarangbang onOpen={openShared} />;
 
