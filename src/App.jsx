@@ -197,6 +197,10 @@ function Home({ me, onOpenBook, onGoLibrary, onGoRooms }) {
   return (
     <main className="page home-page">
       <header className="page-header home-head"><Brand /><button className="profile-link" onClick={() => sb.auth.signOut()} title="로그아웃">{me.name}님의 오늘</button></header>
+      <div className="home-intro">
+        <p>읽는 사람의 시간이<br />조용히 깊어지는 곳.</p>
+        <span>PRIVATE READING ROOM · SEOUL</span>
+      </div>
       <ErrorNote>{error}</ErrorNote>
       {data.loading ? <div className="loading">지난 문장을 꺼내는 중…</div> : daily ? (
         <DailyQuote quote={daily} book={bookMap[daily.book_id]} thoughts={dailyThoughts}
@@ -579,7 +583,7 @@ function DemoApp() {
     { id: "b2", title: "소년이 온다", author: "한강" },
     { id: "b3", title: "명상록", author: "마르쿠스 아우렐리우스" },
   ];
-  return <div className="app-shell"><main className="page home-page"><header className="page-header home-head"><Brand /><span>독자님의 오늘</span></header><DailyQuote quote={quote} book={{ title: "모국어는 차라리 침묵" }} thoughts={thoughts} onAppend={() => {}} onOpen={() => {}} /><section className="home-section"><div className="section-title"><h2>이어서 읽기</h2><button>서재 전체 보기</button></div><div className="continue-row">{demoBooks.map((book) => <CoverCard key={book.id} book={book} small />)}</div></section><button className="room-callout"><span className="room-icon">舍</span><span><b>사랑방에 들러보세요</b><small>답변을 기다리는 질문이 2개 있습니다.</small></span><i>→</i></button></main><nav className="bottom-nav"><button className="active">오늘</button><button>서재</button><button>사랑방</button></nav><div className="demo-badge">디자인 미리보기</div></div>;
+  return <div className="app-shell"><main className="page home-page"><header className="page-header home-head"><Brand /><span>독자님의 오늘</span></header><div className="home-intro"><p>읽는 사람의 시간이<br />조용히 깊어지는 곳.</p><span>PRIVATE READING ROOM · SEOUL</span></div><DailyQuote quote={quote} book={{ title: "모국어는 차라리 침묵" }} thoughts={thoughts} onAppend={() => {}} onOpen={() => {}} /><section className="home-section"><div className="section-title"><h2>이어서 읽기</h2><button>서재 전체 보기</button></div><div className="continue-row">{demoBooks.map((book) => <CoverCard key={book.id} book={book} small />)}</div></section><button className="room-callout"><span className="room-icon">舍</span><span><b>사랑방에 들러보세요</b><small>답변을 기다리는 질문이 2개 있습니다.</small></span><i>→</i></button></main><nav className="bottom-nav"><button className="active">오늘</button><button>서재</button><button>사랑방</button></nav><div className="demo-badge">디자인 미리보기</div></div>;
 }
 
 export function App() {
