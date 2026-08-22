@@ -1,6 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { callAI, formatDate, isMissingRelation, relativeDays, sb, spineColor } from "./lib";
 
+const ADMIN_EMAIL = "szxv7704@gmail.com";
+const INVITE_TOKEN_KEY = "bookeunsungzang_invite_token";
+
+function pendingInviteToken() {
+  const fromHash = window.location.hash.match(/^#\/invite\/([0-9a-f-]{36})$/i)?.[1] || "";
+  if (fromHash) {
+    try { window.sessionStorage.setItem(INVITE_TOKEN_KEY, fromHash); } catch { /* 일회성 초대 토큰 저장을 지원하지 않는 브라우저 */ }
+    return fromHash;
+  }
+  try { return window.sessionStorage.getItem(INVITE_TOKEN_KEY) || ""; } catch { return ""; }
+}
+
 const SOURCE_LABELS = {
   revisit: "다시 읽고 나서",
   ai: "AI와 대화한 후",
@@ -22,7 +34,7 @@ function Brand() {
   );
 }
 
-function Auth() {
+function Auth({ invited = false }) {
   const [error, setError] = useState("");
   const signIn = async () => {
     setError("");
@@ -37,9 +49,9 @@ function Auth() {
     <main className="auth-page">
       <div className="auth-seal">冊</div>
       <h1>책은성장</h1>
-      <p>읽은 문장이 질문이 되고,<br />나눈 생각이 한 권의 책이 됩니다.</p>
+      <p>{invited ? <>사랑방 초대장이 도착했습니다.<br />초대받은 Google 계정으로 들어오세요.</> : <>읽은 문장이 질문이 되고,<br />나눈 생각이 한 권의 책이 됩니다.</>}</p>
       <ErrorNote>{error}</ErrorNote>
-      <button className="primary wide" onClick={signIn}>Google로 서재 열기</button>
+      <button className="primary wide" onClick={signIn}>{invited ? "Google로 초대 수락하기" : "Google로 서재 열기"}</button>
       <small>나의 기록은 서재에, 함께 나눈 생각은 사랑방에 머뭅니다.</small>
     </main>
   );
@@ -65,11 +77,12 @@ function Nickname({ userId, onDone }) {
   );
 }
 
-function InviteOnly() {
+function InviteOnly({ error = "" }) {
   return <main className="auth-page compact">
     <Brand />
     <h2>초대받은 사랑방입니다</h2>
     <p>책은성장은 초대받은 Google 계정으로만 들어올 수 있습니다.<br />초대를 받은 계정이 맞는지 확인해 주세요.</p>
+    <ErrorNote>{error}</ErrorNote>
     <button className="secondary wide" onClick={() => sb.auth.signOut()}>다른 Google 계정으로 로그인</button>
   </main>;
 }
@@ -208,7 +221,7 @@ function NotificationBell({ me, onOpenShared }) {
   </>;
 }
 
-function Home({ me, onOpenBook, onOpenShared, onGoLibrary, onGoRooms }) {
+function Home({ me, onOpenBook, onOpenShared, onManageInvites, onGoLibrary, onGoRooms }) {
   const [data, setData] = useState({ books: [], quotes: [], thoughts: [], loading: true });
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
@@ -237,7 +250,7 @@ function Home({ me, onOpenBook, onOpenShared, onGoLibrary, onGoRooms }) {
 
   return (
     <main className="page home-page">
-      <header className="page-header home-head"><Brand /><div className="home-actions"><NotificationBell me={me} onOpenShared={onOpenShared} /><button className="profile-link" onClick={() => sb.auth.signOut()} title="로그아웃">{me.name}님의 오늘</button></div></header>
+      <header className="page-header home-head"><Brand /><div className="home-actions">{me.email === ADMIN_EMAIL && <button className="admin-link" onClick={onManageInvites}>초대 관리</button>}<NotificationBell me={me} onOpenShared={onOpenShared} /><button className="profile-link" onClick={() => sb.auth.signOut()} title="로그아웃">{me.name}님의 오늘</button></div></header>
       <div className="home-intro">
         <p>읽는 사람의 시간이<br />조용히 깊어지는 곳.</p>
         <span>PRIVATE READING ROOM · SEOUL</span>
@@ -739,6 +752,97 @@ function BookView({ book, me, onBack }) {
   );
 }
 
+const INVITE_STATUS = { pending: "수락 대기", accepted: "입장 완료", revoked: "초대 취소", expired: "기간 만료" };
+
+function invitationLink(token) {
+  return `${window.location.origin}/#/invite/${token}`;
+}
+
+function gmailComposeUrl(invitation) {
+  const link = invitationLink(invitation.token);
+  const subject = "책은성장 사랑방에 초대합니다";
+  const body = `안녕하세요.\n\n책을 읽고 남긴 문장과 생각을 함께 나누는 ‘책은성장’ 사랑방에 초대합니다.\n\n아래 초대장을 열고, 이 메일을 받은 Google 계정으로 로그인해 주세요.\n${link}\n\n초대장은 30일 동안 유효합니다.`;
+  return `https://mail.google.com/mail/?authuser=${encodeURIComponent(ADMIN_EMAIL)}&view=cm&fs=1&to=${encodeURIComponent(invitation.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+function InviteAdmin({ me, onBack }) {
+  const [email, setEmail] = useState("");
+  const [invitations, setInvitations] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [lastInvitation, setLastInvitation] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    const [inviteResult, memberResult] = await Promise.all([
+      sb.rpc("list_reading_invitations"),
+      sb.rpc("list_reading_circle_members"),
+    ]);
+    const loadError = inviteResult.error || memberResult.error;
+    if (loadError) setError(selectiveSharingError(loadError) ? "초대 관리용 데이터베이스 업데이트가 아직 적용되지 않았습니다." : loadError.message);
+    else { setInvitations(inviteResult.data || []); setMembers(memberResult.data || []); setError(""); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const openGmail = (invitation) => window.open(gmailComposeUrl(invitation), "_blank", "noopener,noreferrer");
+  const copyLink = async (invitation) => {
+    await navigator.clipboard.writeText(invitationLink(invitation.token));
+    setLastInvitation(invitation);
+  };
+  const create = async () => {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized || busy) return;
+    const composeWindow = window.open("about:blank", "_blank");
+    setBusy(true); setError("");
+    const { data, error: createError } = await sb.rpc("create_reading_invitation", { p_email: normalized });
+    setBusy(false);
+    const invitation = data?.[0];
+    if (createError || !invitation) {
+      composeWindow?.close();
+      setError(selectiveSharingError(createError) ? "초대 관리용 데이터베이스 업데이트가 아직 적용되지 않았습니다." : createError?.message || "초대장을 만들지 못했습니다.");
+      return;
+    }
+    setEmail(""); setLastInvitation(invitation);
+    if (composeWindow) { composeWindow.opener = null; composeWindow.location.replace(gmailComposeUrl(invitation)); }
+    await load();
+  };
+  const revoke = async (invitation) => {
+    const message = invitation.status === "accepted" ? `${invitation.display_name || invitation.email}님을 사랑방에서 내보낼까요?` : `${invitation.email} 초대를 취소할까요?`;
+    if (!window.confirm(message)) return;
+    const { error: revokeError } = await sb.rpc("revoke_reading_invitation", { p_id: invitation.id });
+    if (revokeError) setError(revokeError.message); else load();
+  };
+  const removeMember = async (member) => {
+    if (!window.confirm(`${member.display_name || member.email || "이 구성원"}님을 사랑방에서 내보낼까요? 다시 초대하기 전에는 들어올 수 없습니다.`)) return;
+    const { error: removeError } = await sb.rpc("remove_reading_circle_member", { p_user_id: member.user_id });
+    if (removeError) setError(removeError.message); else load();
+  };
+
+  if (me.email !== ADMIN_EMAIL) return <main className="page"><button className="back-button" onClick={onBack}>← 돌아가기</button><ErrorNote>관리자만 초대 관리를 열 수 있습니다.</ErrorNote></main>;
+
+  return <main className="page invite-admin-page">
+    <button className="back-button" onClick={onBack}>← 오늘로</button>
+    <header className="page-header"><div><div className="eyebrow">관리자 전용</div><h1>사랑방 초대 관리</h1></div><span className="room-seal">招</span></header>
+    <p className="room-lead">초대할 이메일을 등록하고 Gmail에서 메일을 보냅니다. 받은 사람은 같은 Google 계정으로만 입장할 수 있습니다.</p>
+    <section className="invite-create-card">
+      <label className="field"><span>초대할 Google 이메일</span><div className="invite-email-row"><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} onKeyDown={(event) => event.key === "Enter" && create()} placeholder="reader@gmail.com" /><button className="primary" disabled={busy || !email.trim()} onClick={create}>{busy ? "초대장 만드는 중…" : "Gmail로 초대하기"}</button></div></label>
+      <small>초대 기록을 만든 뒤 Gmail 작성창이 열립니다. 내용을 확인하고 보내기를 눌러주세요.</small>
+    </section>
+    {lastInvitation && <div className="notice success invite-ready"><span><b>{lastInvitation.email}</b> 초대 링크가 준비됐습니다.</span><button className="secondary" onClick={() => copyLink(lastInvitation)}>링크 복사</button></div>}
+    <ErrorNote>{error}</ErrorNote>
+    {loading ? <div className="loading">초대 명단을 불러오는 중…</div> : <>
+      <section className="admin-section"><div className="section-title"><h2>초대 현황</h2><span>{invitations.length}건</span></div>
+        {!invitations.length ? <div className="empty-state small"><span>아직 보낸 초대가 없습니다</span></div> : <div className="invite-list">{invitations.map((invitation) => <article key={invitation.id}><div><span className={`status-badge ${invitation.status}`}>{INVITE_STATUS[invitation.status] || invitation.status}</span><b>{invitation.display_name || invitation.email}</b>{invitation.display_name && <small>{invitation.email}</small>}<time>{formatDate(invitation.created_at)} 초대 · {formatDate(invitation.expires_at)}까지</time></div><div className="invite-actions">{invitation.status === "pending" && <><button className="secondary" onClick={() => openGmail(invitation)}>메일 다시 열기</button><button className="secondary" onClick={() => copyLink(invitation)}>링크 복사</button></>} {(invitation.status === "pending" || invitation.status === "accepted") && <button className="text-button danger" onClick={() => revoke(invitation)}>{invitation.status === "accepted" ? "입장 취소" : "초대 취소"}</button>}{(invitation.status === "revoked" || invitation.status === "expired") && <button className="secondary" onClick={() => setEmail(invitation.email)}>다시 초대</button>}</div></article>)}</div>}
+      </section>
+      <section className="admin-section"><div className="section-title"><h2>현재 사랑방 식구</h2><span>{members.length}명</span></div>
+        {!members.length ? <div className="empty-state small"><span>아직 입장한 사람이 없습니다</span></div> : <div className="member-list">{members.map((member) => <article key={member.user_id}><i>{(member.display_name || member.email || "독").slice(0, 1)}</i><div><b>{member.display_name || "이름 미등록"}</b><small>{member.email || "다음 로그인 때 이메일이 확인됩니다."}</small><time>{formatDate(member.joined_at)} 입장</time></div><button className="text-button danger" onClick={() => removeMember(member)}>내보내기</button></article>)}</div>}
+      </section>
+    </>}
+  </main>;
+}
+
 function Sarangbang({ onOpen }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -795,18 +899,40 @@ export function App() {
   const [me, setMe] = useState(null);
   const [tab, setTab] = useState("home");
   const [route, setRoute] = useState(null);
-  const loadMe = useCallback(async (userId) => {
-    const [profileResult, memberResult] = await Promise.all([sb.from("profiles").select("*").eq("id", userId).single(), sb.rpc("is_member")]);
+  const [inviteToken, setInviteToken] = useState(() => pendingInviteToken());
+  const [inviteError, setInviteError] = useState("");
+  const loadMe = useCallback(async (userId, emailAddress) => {
+    const profilePromise = sb.from("profiles").select("*").eq("id", userId).single();
+    let memberResult = await sb.rpc("reading_access");
+    if (memberResult.error && selectiveSharingError(memberResult.error)) memberResult = await sb.rpc("is_member");
+    const profileResult = await profilePromise;
     const member = !!memberResult.data;
     if (member) await sb.rpc("register_reading_circle_member");
-    setMe({ id: userId, name: profileResult.data?.display_name || null, member, shelfPublic: !!profileResult.data?.shelf_public });
+    setMe({ id: userId, email: String(emailAddress || "").toLowerCase(), name: profileResult.data?.display_name || null, member, shelfPublic: !!profileResult.data?.shelf_public });
   }, []);
   useEffect(() => {
     sb.auth.getSession().then(({ data }) => setSession(data.session));
     const { data } = sb.auth.onAuthStateChange((_event, next) => setSession(next));
     return () => data.subscription.unsubscribe();
   }, []);
-  useEffect(() => { if (session?.user) loadMe(session.user.id); else setMe(null); }, [session, loadMe]);
+  useEffect(() => {
+    let active = true;
+    if (!session?.user) { setMe(null); return undefined; }
+    (async () => {
+      if (inviteToken) {
+        const { error } = await sb.rpc("accept_reading_invitation", { p_token: inviteToken });
+        if (!active) return;
+        if (error) setInviteError(selectiveSharingError(error) ? "초대 기능용 데이터베이스 업데이트가 아직 적용되지 않았습니다." : error.message);
+        else {
+          setInviteError(""); setInviteToken("");
+          try { window.sessionStorage.removeItem(INVITE_TOKEN_KEY); } catch { /* 저장소 미지원 */ }
+          window.history.replaceState(null, "", window.location.pathname);
+        }
+      }
+      if (active) await loadMe(session.user.id, session.user.email);
+    })();
+    return () => { active = false; };
+  }, [session, inviteToken, loadMe]);
   useEffect(() => {
     if (!me) return;
     const match = window.location.hash.match(/^#\/b\/([0-9a-f-]{36})$/i);
@@ -824,15 +950,16 @@ export function App() {
 
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("preview")) return <DemoApp />;
   if (session === undefined) return null;
-  if (!session) return <Auth />;
+  if (!session) return <Auth invited={!!inviteToken} />;
   if (!me) return <div className="loading fullscreen">서재를 여는 중…</div>;
-  if (!me.member) return <InviteOnly />;
-  if (!me.name) return <Nickname userId={me.id} onDone={() => loadMe(me.id)} />;
+  if (!me.member) return <InviteOnly error={inviteError} />;
+  if (!me.name) return <Nickname userId={me.id} onDone={() => loadMe(me.id, me.email)} />;
 
   let content;
-  if (route?.type === "book") content = <BookView book={route.book} me={me} onBack={closeRoute} />;
+  if (route?.type === "invites") content = <InviteAdmin me={me} onBack={closeRoute} />;
+  else if (route?.type === "book") content = <BookView book={route.book} me={me} onBack={closeRoute} />;
   else if (route?.type === "shared") content = <SharedBook bookId={route.id} me={me} onBack={closeRoute} />;
-  else if (tab === "home") content = <Home me={me} onOpenBook={(book) => book && setRoute({ type: "book", book })} onOpenShared={openShared} onGoLibrary={() => setTab("library")} onGoRooms={() => setTab("rooms")} />;
+  else if (tab === "home") content = <Home me={me} onOpenBook={(book) => book && setRoute({ type: "book", book })} onOpenShared={openShared} onManageInvites={() => setRoute({ type: "invites" })} onGoLibrary={() => setTab("library")} onGoRooms={() => setTab("rooms")} />;
   else if (tab === "library") content = <Library me={me} onOpenBook={(book) => setRoute({ type: "book", book })} />;
   else content = <Sarangbang onOpen={openShared} />;
 

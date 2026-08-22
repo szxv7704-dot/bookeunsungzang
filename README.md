@@ -14,6 +14,7 @@
 - `덧붙이기`: 새로운 날짜의 생각을 별도 기록으로 추가합니다.
 - `여기까지 정리하기`: AI 대화를 주제별 독후감으로 엮어 내 서재에만 저장합니다.
 - `사랑방에 주제 나누기`: 정리된 주제와 공유할 사람을 각각 선택하며, AI 대화 원문과 선택하지 않은 기록은 공개하지 않습니다.
+- `초대 관리`: `szxv7704@gmail.com` 관리자에게만 보입니다. 이메일별 초대 링크를 만들고 Gmail 작성창을 열며, 수락·취소·구성원 내보내기를 관리합니다.
 - 기존 `books`, `quotes`, `topics`, `messages` 데이터는 그대로 사용합니다.
 - 새 생각은 additive migration으로 추가되는 `quote_thoughts`에 저장됩니다.
 
@@ -54,6 +55,7 @@ Supabase SQL Editor에서 다음 마이그레이션을 순서대로 한 번씩 �
 
 1. `supabase/migrations/202608220001_quote_thoughts.sql` — 날짜별 생각 덧붙이기
 2. `supabase/migrations/202608220002_selective_topic_sharing.sql` — 주제·사람 선택 공유와 알림
+3. `supabase/migrations/202608220003_invitation_management.sql` — 관리자 전용 초대 링크·입장 승인·구성원 관리
 
 두 마이그레이션 모두 기존 책·문장·AI 대화·독후감 행을 삭제하지 않습니다.
 
