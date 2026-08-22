@@ -418,7 +418,8 @@ function Talk({ book, quotes, me, shared = false }) {
     <section className="talk-panel">
       <div className="talk-intro"><b>{shared ? "함께 생각을 넓히는 대화" : "나만의 생각 탐색"}</b><p>{shared ? "이곳의 대화는 사랑방 구성원에게 보입니다. 개인적인 탐색은 서재에서 이어가세요." : "AI의 해석은 정답이 아니라 다른 관점입니다. 남기고 싶은 부분만 사랑방에 가져가세요."}</p></div>
       <div className="messages">{messages.map((message) => <article className={`message ${message.role === "ai" ? "ai" : "human"}`} key={message.id}><small>{message.author_name || (message.role === "ai" ? "AI" : "독자")}</small><p>{message.content}</p></article>)}<div ref={endRef} /></div>
-      {error && <div className="ai-error"><ErrorNote>{error}</ErrorNote>{messages.at(-1)?.role === "human" && <button className="secondary" onClick={retry} disabled={busy}>AI 답변 다시 받기</button>}</div>}
+      <ErrorNote>{error}</ErrorNote>
+      {messages.at(-1)?.role === "human" && !busy && <div className="ai-retry"><small>아직 AI 답변이 도착하지 않았습니다.</small><button className="secondary" onClick={retry}>AI 답변 다시 받기</button></div>}
       <div className="composer"><textarea rows="2" value={text} onChange={(event) => setText(event.target.value)} placeholder="무엇이 궁금한가요?" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} /><button className="primary" onClick={send} disabled={busy}>{busy ? "생각 중" : "보내기"}</button></div>
     </section>
   );

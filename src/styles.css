@@ -174,8 +174,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--jade); }
 .message.human p { background: #e7dfcf; }
 .message.ai p { border: 1px solid var(--line); background: var(--card); }
 .composer { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; position: sticky; bottom: 72px; margin-top: 22px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(244,239,229,.94); backdrop-filter: blur(8px); }
-.ai-error { margin: 12px 0; }
-.ai-error .notice { margin-bottom: 8px; }
+.ai-retry { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; padding: 12px 14px; border: 1px solid var(--line); background: rgba(255,253,248,.55); }
+.ai-retry small { color: var(--muted); }
 
 .question-board > .section-title { margin-bottom: 22px; }
 .question-number { color: var(--seal); font-size: 10px; font-weight: 600; letter-spacing: .14em; }
