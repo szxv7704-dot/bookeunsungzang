@@ -4,6 +4,47 @@ import { callAI, formatDate, isMissingRelation, relativeDays, sb, spineColor } f
 const ADMIN_EMAIL = "szxv7704@gmail.com";
 const INVITE_TOKEN_KEY = "bookeunsungzang_invite_token";
 
+const LIBRARY_CLASSES = [
+  { code: "000", range: "000–099", name: "총류", note: "지식·정보·컴퓨터" },
+  { code: "100", range: "100–199", name: "철학", note: "철학·심리·윤리" },
+  { code: "200", range: "200–299", name: "종교", note: "종교·신앙·신화" },
+  { code: "300", range: "300–399", name: "사회과학", note: "사회·경제·교육" },
+  { code: "400", range: "400–499", name: "자연과학", note: "수학·과학·자연" },
+  { code: "500", range: "500–599", name: "기술과학", note: "의학·공학·생활" },
+  { code: "600", range: "600–699", name: "예술", note: "예술·취미·스포츠" },
+  { code: "700", range: "700–799", name: "언어", note: "언어·국어·외국어" },
+  { code: "800", range: "800–899", name: "문학", note: "소설·시·에세이" },
+  { code: "900", range: "900–999", name: "역사", note: "역사·지리·여행" },
+];
+
+function classificationGroup(code) {
+  const raw = String(code ?? "").trim();
+  if (!/^\d{1,3}$/.test(raw)) return null;
+  const value = raw.padStart(3, "0");
+  return LIBRARY_CLASSES.find((item) => item.code[0] === value[0]) || null;
+}
+
+function classificationFromCategory(categoryName = "") {
+  const name = categoryName.toLowerCase();
+  const rules = [
+    ["000", /컴퓨터|인터넷|잡지|백과|사전|도서관|문헌정보|출판/],
+    ["100", /철학|심리|윤리|인문학/],
+    ["200", /종교|기독교|불교|천주교|신화/],
+    ["300", /사회과학|경제|경영|정치|법률|교육|육아|청소년/],
+    ["400", /자연과학|수학|물리|화학|생명과학|지구과학|과학/],
+    ["500", /기술|공학|의학|건강|건축|농업|요리|가정|생활과학/],
+    ["600", /예술|대중문화|미술|음악|사진|디자인|영화|취미|스포츠/],
+    ["700", /언어|외국어|국어|영어|일본어|중국어/],
+    ["800", /소설|시|희곡|에세이|문학|고전/],
+    ["900", /역사|지리|여행|전기|인물/],
+  ];
+  return rules.find(([, pattern]) => pattern.test(name))?.[0] || "";
+}
+
+function classificationSchemaMissing(error) {
+  return /classification_code|source_category|schema cache/i.test(error?.message || "");
+}
+
 function pendingInviteToken() {
   const fromHash = window.location.hash.match(/^#\/invite\/([0-9a-f-]{36})$/i)?.[1] || "";
   if (fromHash) {
@@ -276,11 +317,11 @@ function CoverCard({ book, onClick, small = false, meta }) {
   );
 }
 
-function AddBook({ onClose, onAdded }) {
+function AddBook({ onClose, onAdded, initialClassification = "" }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState(null);
   const [manual, setManual] = useState(false);
-  const [form, setForm] = useState({ title: "", author: "", publisher: "" });
+  const [form, setForm] = useState({ title: "", author: "", publisher: "", classification: initialClassification });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const search = async () => {
@@ -295,23 +336,25 @@ function AddBook({ onClose, onAdded }) {
     setBusy(false);
   };
   const add = async (book) => {
-    const row = book ? { title: book.title, author: book.author || null, publisher: book.publisher || null, pub_date: book.pubDate || null, isbn13: book.isbn13 || null, cover_url: book.cover || null, link: book.link || null }
-      : { title: form.title.trim(), author: form.author.trim() || null, publisher: form.publisher.trim() || null };
+    const inferred = book ? classificationFromCategory(book.categoryName) : form.classification;
+    const row = book ? { title: book.title, author: book.author || null, publisher: book.publisher || null, pub_date: book.pubDate || null, isbn13: book.isbn13 || null, cover_url: book.cover || null, link: book.link || null, classification_code: inferred || initialClassification || null, source_category: book.categoryName || null }
+      : { title: form.title.trim(), author: form.author.trim() || null, publisher: form.publisher.trim() || null, classification_code: form.classification || null };
     if (!row.title) return;
     const { error: insertError } = await sb.from("books").insert(row);
-    if (insertError) setError(insertError.message); else onAdded();
+    if (insertError) setError(classificationSchemaMissing(insertError) ? "서가 분류 업데이트를 먼저 적용해 주세요. 기존 책은 그대로 보존됩니다." : insertError.message); else onAdded();
   };
   return (
     <Sheet title="서재에 책 꽂기" onClose={onClose}>
       {!manual ? <>
         <div className="search-row"><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && search()} placeholder="책 제목이나 저자" autoFocus /><button className="primary" onClick={search}>{busy ? "찾는 중" : "찾기"}</button></div>
         <ErrorNote>{error}</ErrorNote>
-        <div className="search-results">{results?.map((book) => <button key={book.isbn13 || book.link} onClick={() => add(book)}>{book.cover ? <img src={book.cover} alt="" /> : <i style={{ background: spineColor(book.title) }} />}<span><b>{book.title}</b><small>{book.author}{book.publisher ? ` · ${book.publisher}` : ""}</small></span></button>)}</div>
+        <div className="search-results">{results?.map((book) => { const group = classificationGroup(classificationFromCategory(book.categoryName) || initialClassification); return <button key={book.isbn13 || book.link} onClick={() => add(book)}>{book.cover ? <img src={book.cover} alt="" /> : <i style={{ background: spineColor(book.title) }} />}<span><b>{book.title}</b><small>{book.author}{book.publisher ? ` · ${book.publisher}` : ""}</small>{group && <em>{group.code} {group.name}</em>}</span></button>; })}</div>
         <button className="text-button wide" onClick={() => setManual(true)}>찾는 책이 없나요? 직접 입력하기</button>
       </> : <>
         <label className="field"><span>책 제목</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} autoFocus /></label>
         <label className="field"><span>저자</span><input value={form.author} onChange={(event) => setForm({ ...form, author: event.target.value })} /></label>
         <label className="field"><span>출판사</span><input value={form.publisher} onChange={(event) => setForm({ ...form, publisher: event.target.value })} /></label>
+        <label className="field"><span>서가 분류</span><select value={form.classification} onChange={(event) => setForm({ ...form, classification: event.target.value })}><option value="">나중에 분류하기</option>{LIBRARY_CLASSES.map((item) => <option key={item.code} value={item.code}>{item.range} {item.name}</option>)}</select></label>
         <ErrorNote>{error}</ErrorNote>
         <button className="primary wide" onClick={() => add(null)}>책장에 꽂기</button>
       </>}
@@ -323,7 +366,7 @@ function Library({ me, onOpenBook }) {
   const [books, setBooks] = useState([]);
   const [quotes, setQuotes] = useState([]);
   const [thoughts, setThoughts] = useState([]);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
@@ -344,22 +387,39 @@ function Library({ me, onOpenBook }) {
     return counts;
   }, [quotes, thoughts, me.id]);
 
+  const groupedBooks = useMemo(() => {
+    const groups = Object.fromEntries(LIBRARY_CLASSES.map((item) => [item.code, []]));
+    const pending = [];
+    books.forEach((book) => {
+      const group = classificationGroup(book.classification_code);
+      if (group) groups[group.code].push(book); else pending.push(book);
+    });
+    return { groups, pending };
+  }, [books]);
+  const maxCategoryCount = Math.max(1, ...LIBRARY_CLASSES.map((item) => groupedBooks.groups[item.code].length));
+  const openAddBook = (code = "") => setAdding({ code });
+
+  const renderSpine = (book) => {
+    const chars = writtenByBook[book.id] || 0;
+    const width = Math.min(66, 29 + Math.sqrt(chars) * 1.05);
+    return <button className="book-spine" key={book.id} style={{ width, background: spineColor(book.title) }} onClick={() => onOpenBook(book)} title={`${book.title} · 내가 쓴 글 ${chars.toLocaleString()}자`}>
+      <span>{book.title}</span><small>{book.author}</small>
+    </button>;
+  };
+
   return (
     <main className="page library-page">
-      <header className="page-header"><div><div className="eyebrow">나만의 기록이 머무는 곳</div><h1>서재</h1></div><button className="round-button" onClick={() => setAdding(true)} aria-label="책 추가">＋</button></header>
+      <header className="page-header"><div><div className="eyebrow">000부터 999까지, 생각이 자라는 서가</div><h1>서재</h1></div><button className="round-button" onClick={() => openAddBook()} aria-label="책 추가">＋</button></header>
       <ErrorNote>{error}</ErrorNote>
       {loading ? <div className="loading">책장을 여는 중…</div> : books.length ? (
-        <div className="bookshelf"><div className="shelf-books">
-          {books.map((book) => {
-            const chars = writtenByBook[book.id] || 0;
-            const width = Math.min(74, 34 + Math.sqrt(chars) * 1.15);
-            return <button className="book-spine" key={book.id} style={{ width, background: spineColor(book.title) }} onClick={() => onOpenBook(book)} title={`${book.title} · 내가 쓴 글 ${chars.toLocaleString()}자`}>
-              <span>{book.title}</span><small>{book.author}</small>
-            </button>;
-          })}
-        </div><div className="shelf-board" /><p className="shelf-caption">내가 쓴 생각이 쌓일수록 책등도 조금씩 두꺼워집니다.</p></div>
-      ) : <section className="empty-state"><span>아직 비어 있는 첫 번째 칸</span><p>책을 꽂고, 기억하고 싶은 문장을 남겨보세요.</p><button className="primary" onClick={() => setAdding(true)}>첫 책 꽂기</button></section>}
-      {adding && <AddBook onClose={() => setAdding(false)} onAdded={() => { setAdding(false); load(); }} />}
+        <>
+          <section className="reading-map"><div className="reading-map-copy"><span>나의 독서 지도</span><b>{books.length}권이 만든 관심의 모양</b><small>분류별로 얼마나 읽었는지 한눈에 살펴보세요.</small></div><div className="reading-map-bars">{LIBRARY_CLASSES.map((item) => { const count = groupedBooks.groups[item.code].length; return <button key={item.code} onClick={() => document.getElementById(`shelf-${item.code}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} title={`${item.name} ${count}권`}><span>{item.code}</span><i><u style={{ height: `${Math.max(count ? 18 : 4, (count / maxCategoryCount) * 100)}%` }} /></i><b>{count}</b></button>; })}</div></section>
+          <div className="library-cabinet">{LIBRARY_CLASSES.map((item, index) => { const shelfBooks = groupedBooks.groups[item.code]; const emptySlots = Math.max(3, 6 - Math.min(shelfBooks.length, 3)); return <section className={`classification-shelf tone-${index % 5}`} id={`shelf-${item.code}`} key={item.code}><header className="shelf-label"><span>{item.range}</span><div><b>{item.name}</b><small>{item.note}</small></div><em>{shelfBooks.length}권</em></header><div className="classified-books">{shelfBooks.map(renderSpine)}{Array.from({ length: emptySlots }, (_, slot) => <span className="empty-book-slot" key={slot} />)}<button className="shelf-add" onClick={() => openAddBook(item.code)} aria-label={`${item.name} 서가에 책 추가`}>＋</button></div><div className="shelf-board" /></section>; })}</div>
+          {!!groupedBooks.pending.length && <section className="pending-shelf"><div><span>분류 대기</span><b>기존 책 {groupedBooks.pending.length}권</b><small>책을 열어 분야를 정하면 알맞은 서가로 옮겨집니다.</small></div><div className="pending-books">{groupedBooks.pending.map(renderSpine)}</div></section>}
+          <p className="shelf-caption">내가 쓴 생각이 쌓일수록 책등은 두꺼워지고, 많이 읽은 분야의 서가는 풍성해집니다.</p>
+        </>
+      ) : <section className="empty-library"><div className="empty-library-light"><span>열 개의 서가가 첫 책을 기다립니다</span><p>000 총류부터 900 역사까지, 읽고 싶은 분야의 빈 칸을 하나씩 채워보세요.</p><button className="primary" onClick={() => openAddBook()}>첫 책 꽂기</button></div>{LIBRARY_CLASSES.map((item) => <div className="empty-class-row" key={item.code}><b>{item.code}</b><span>{item.name}</span><i /></div>)}</section>}
+      {adding && <AddBook initialClassification={adding.code} onClose={() => setAdding(null)} onAdded={() => { setAdding(null); load(); }} />}
     </main>
   );
 }
@@ -709,6 +769,8 @@ function BookView({ book, me, onBack }) {
   const [adding, setAdding] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [sharedMessage, setSharedMessage] = useState("");
+  const [classification, setClassification] = useState(classificationGroup(book.classification_code)?.code || "");
+  const [savingClassification, setSavingClassification] = useState(false);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
     const { data, error: quoteError } = await sb.from("quotes").select("*").eq("book_id", book.id).order("created_at");
@@ -719,12 +781,20 @@ function BookView({ book, me, onBack }) {
   }, [book.id]);
   useEffect(() => { load(); }, [load]);
 
+  const saveClassification = async () => {
+    setSavingClassification(true); setError("");
+    const { error: classificationError } = await sb.from("books").update({ classification_code: classification || null }).eq("id", book.id);
+    setSavingClassification(false);
+    if (classificationError) setError(classificationSchemaMissing(classificationError) ? "서가 분류 업데이트를 먼저 적용해 주세요." : classificationError.message);
+    else setSharedMessage(`${classificationGroup(classification)?.name || "분류 대기"} 서가에 저장했습니다.`);
+  };
+
   return (
     <main className="page book-page">
       <button className="back-button" onClick={onBack}>← 서재로</button>
       <header className="book-hero">
         <span className="book-cover-mini">{book.cover_url ? <img src={book.cover_url} alt="" /> : <i style={{ background: spineColor(book.title) }}>{book.title}</i>}</span>
-        <div><div className="eyebrow">나의 독서책 · 비공개</div><h1>{book.title}</h1><p>{book.author}</p><button className="text-button share-topic-button" onClick={() => setSharing(true)}>원하는 주제만 사랑방에 나누기</button></div>
+        <div><div className="eyebrow">나의 독서책 · 비공개</div><h1>{book.title}</h1><p>{book.author}</p><div className="book-classification"><select aria-label="서가 분류" value={classification} onChange={(event) => setClassification(event.target.value)}><option value="">분류 대기</option>{LIBRARY_CLASSES.map((item) => <option value={item.code} key={item.code}>{item.code} {item.name}</option>)}</select><button className="secondary" disabled={savingClassification} onClick={saveClassification}>{savingClassification ? "옮기는 중…" : "서가 저장"}</button></div><button className="text-button share-topic-button" onClick={() => setSharing(true)}>원하는 주제만 사랑방에 나누기</button></div>
       </header>
       <nav className="tabs"><button className={tab === "records" ? "active" : ""} onClick={() => setTab("records")}>문장과 생각</button><button className={tab === "talk" ? "active" : ""} onClick={() => setTab("talk")}>AI와 생각 나누기</button><button className={tab === "questions" ? "active" : ""} onClick={() => setTab("questions")}>나의 독후감</button></nav>
       <ErrorNote>{error}</ErrorNote>

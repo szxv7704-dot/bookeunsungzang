@@ -49,7 +49,9 @@ export default async function handler(req, res) {
       pubDate: it.pubDate || null,
       isbn13: it.isbn13 || it.isbn || null,
       cover: https(it.cover),
-      link: https(it.link)
+      link: https(it.link),
+      categoryName: strip(it.categoryName),
+      categoryId: it.categoryId || null
     }));
 
     return res.status(200).json({ items });
