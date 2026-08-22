@@ -24,6 +24,9 @@ npm run dev
 
 AI 대화와 도서 검색까지 로컬에서 사용하려면 `.env.example`을 `.env.local`로 복사한 뒤 서버 전용 키를 입력합니다.
 
+- [OpenAI API 키 발급](https://platform.openai.com/api-keys)
+- [알라딘 TTB 키 발급 및 URL 등록](https://www.aladin.co.kr/ttb/wblog_manage.aspx) — 알라딘 로그인 후 사용할 사이트 URL을 등록하면 발급됩니다.
+
 ```env
 OPENAI_API_KEY=발급받은_OpenAI_API_키
 ALADIN_TTB_KEY=발급받은_알라딘_TTB_키
