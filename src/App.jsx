@@ -3,6 +3,7 @@ import { callAI, formatDate, isMissingRelation, relativeDays, sb, spineColor } f
 
 const ADMIN_EMAIL = "szxv7704@gmail.com";
 const INVITE_TOKEN_KEY = "bookeunsungzang_invite_token";
+const LOCAL_CLASSIFICATION_KEY = "bookeunsungzang_local_classifications";
 
 const LIBRARY_CLASSES = [
   { code: "000", range: "000–099", name: "총류", note: "지식·정보·컴퓨터" },
@@ -43,6 +44,17 @@ function classificationFromCategory(categoryName = "") {
 
 function classificationSchemaMissing(error) {
   return /classification_code|source_category|schema cache/i.test(error?.message || "");
+}
+
+function loadLocalClassifications() {
+  try { return JSON.parse(window.localStorage.getItem(LOCAL_CLASSIFICATION_KEY) || "{}"); } catch { return {}; }
+}
+
+function saveLocalClassification(bookId, code) {
+  const values = loadLocalClassifications();
+  if (code) values[bookId] = code; else delete values[bookId];
+  try { window.localStorage.setItem(LOCAL_CLASSIFICATION_KEY, JSON.stringify(values)); } catch { /* 로컬 저장소 미지원 */ }
+  return values;
 }
 
 function pendingInviteToken() {
@@ -340,8 +352,14 @@ function AddBook({ onClose, onAdded, initialClassification = "" }) {
     const row = book ? { title: book.title, author: book.author || null, publisher: book.publisher || null, pub_date: book.pubDate || null, isbn13: book.isbn13 || null, cover_url: book.cover || null, link: book.link || null, classification_code: inferred || initialClassification || null, source_category: book.categoryName || null }
       : { title: form.title.trim(), author: form.author.trim() || null, publisher: form.publisher.trim() || null, classification_code: form.classification || null };
     if (!row.title) return;
-    const { error: insertError } = await sb.from("books").insert(row);
-    if (insertError) setError(classificationSchemaMissing(insertError) ? "서가 분류 업데이트를 먼저 적용해 주세요. 기존 책은 그대로 보존됩니다." : insertError.message); else onAdded();
+    let { data: inserted, error: insertError } = await sb.from("books").insert(row).select("id").single();
+    if (classificationSchemaMissing(insertError)) {
+      const { classification_code: localCode, source_category: _sourceCategory, ...legacyRow } = row;
+      const fallback = await sb.from("books").insert(legacyRow).select("id").single();
+      inserted = fallback.data; insertError = fallback.error;
+      if (!insertError && inserted?.id && localCode) saveLocalClassification(inserted.id, localCode);
+    }
+    if (insertError) setError(insertError.message); else onAdded();
   };
   return (
     <Sheet title="서재에 책 꽂기" onClose={onClose}>
@@ -367,6 +385,7 @@ function Library({ me, onOpenBook }) {
   const [quotes, setQuotes] = useState([]);
   const [thoughts, setThoughts] = useState([]);
   const [adding, setAdding] = useState(null);
+  const [localClassifications, setLocalClassifications] = useState(loadLocalClassifications);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
@@ -391,19 +410,21 @@ function Library({ me, onOpenBook }) {
     const groups = Object.fromEntries(LIBRARY_CLASSES.map((item) => [item.code, []]));
     const pending = [];
     books.forEach((book) => {
-      const group = classificationGroup(book.classification_code);
+      const group = classificationGroup(book.classification_code || localClassifications[book.id]);
       if (group) groups[group.code].push(book); else pending.push(book);
     });
     return { groups, pending };
-  }, [books]);
+  }, [books, localClassifications]);
   const maxCategoryCount = Math.max(1, ...LIBRARY_CLASSES.map((item) => groupedBooks.groups[item.code].length));
   const openAddBook = (code = "") => setAdding({ code });
 
-  const renderSpine = (book) => {
+  const renderLibraryBook = (book) => {
     const chars = writtenByBook[book.id] || 0;
-    const width = Math.min(66, 29 + Math.sqrt(chars) * 1.05);
-    return <button className="book-spine" key={book.id} style={{ width, background: spineColor(book.title) }} onClick={() => onOpenBook(book)} title={`${book.title} · 내가 쓴 글 ${chars.toLocaleString()}자`}>
-      <span>{book.title}</span><small>{book.author}</small>
+    const depth = Math.min(11, 2 + Math.sqrt(chars) * .16);
+    const effectiveBook = { ...book, classification_code: book.classification_code || localClassifications[book.id] || null };
+    return <button className="library-book" key={book.id} style={{ "--book-depth": `${depth}px` }} onClick={() => onOpenBook(effectiveBook)} title={`${book.title} · 내가 쓴 글 ${chars.toLocaleString()}자`}>
+      <span className="library-book-frame">{book.cover_url ? <img src={book.cover_url} alt={`《${book.title}》 표지`} /> : <i style={{ background: spineColor(book.title) }}>{book.title}</i>}</span>
+      <span className="library-book-label"><strong>{book.title}</strong><small>{book.author || "저자 미상"}</small></span>
     </button>;
   };
 
@@ -414,12 +435,12 @@ function Library({ me, onOpenBook }) {
       {loading ? <div className="loading">책장을 여는 중…</div> : books.length ? (
         <>
           <section className="reading-map"><div className="reading-map-copy"><span>나의 독서 지도</span><b>{books.length}권이 만든 관심의 모양</b><small>분류별로 얼마나 읽었는지 한눈에 살펴보세요.</small></div><div className="reading-map-bars">{LIBRARY_CLASSES.map((item) => { const count = groupedBooks.groups[item.code].length; return <button key={item.code} onClick={() => document.getElementById(`shelf-${item.code}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} title={`${item.name} ${count}권`}><span>{item.code}</span><i><u style={{ height: `${Math.max(count ? 18 : 4, (count / maxCategoryCount) * 100)}%` }} /></i><b>{count}</b></button>; })}</div></section>
-          <div className="library-cabinet">{LIBRARY_CLASSES.map((item, index) => { const shelfBooks = groupedBooks.groups[item.code]; const emptySlots = Math.max(3, 6 - Math.min(shelfBooks.length, 3)); return <section className={`classification-shelf tone-${index % 5}`} id={`shelf-${item.code}`} key={item.code}><header className="shelf-label"><span>{item.range}</span><div><b>{item.name}</b><small>{item.note}</small></div><em>{shelfBooks.length}권</em></header><div className="classified-books">{shelfBooks.map(renderSpine)}{Array.from({ length: emptySlots }, (_, slot) => <span className="empty-book-slot" key={slot} />)}<button className="shelf-add" onClick={() => openAddBook(item.code)} aria-label={`${item.name} 서가에 책 추가`}>＋</button></div><div className="shelf-board" /></section>; })}</div>
-          {!!groupedBooks.pending.length && <section className="pending-shelf"><div><span>분류 대기</span><b>기존 책 {groupedBooks.pending.length}권</b><small>책을 열어 분야를 정하면 알맞은 서가로 옮겨집니다.</small></div><div className="pending-books">{groupedBooks.pending.map(renderSpine)}</div></section>}
-          <p className="shelf-caption">내가 쓴 생각이 쌓일수록 책등은 두꺼워지고, 많이 읽은 분야의 서가는 풍성해집니다.</p>
+          <div className="library-cabinet">{LIBRARY_CLASSES.map((item, index) => { const shelfBooks = groupedBooks.groups[item.code]; const emptySlots = Math.max(2, 5 - Math.min(shelfBooks.length, 3)); return <section className={`classification-shelf tone-${index % 5}`} id={`shelf-${item.code}`} key={item.code}><header className="shelf-label"><span>{item.range}</span><div><b>{item.name}</b><small>{item.note}</small></div><em>{shelfBooks.length}권</em></header><div className="classified-books">{shelfBooks.map(renderLibraryBook)}{Array.from({ length: emptySlots }, (_, slot) => <span className="empty-book-slot" key={slot} />)}<button className="shelf-add" onClick={() => openAddBook(item.code)} aria-label={`${item.name} 서가에 책 추가`}>＋</button></div><div className="shelf-board" /></section>; })}</div>
+          {!!groupedBooks.pending.length && <section className="pending-shelf"><div><span>분류 대기</span><b>기존 책 {groupedBooks.pending.length}권</b><small>책을 열어 분야를 정하면 알맞은 서가로 옮겨집니다.</small></div><div className="pending-books">{groupedBooks.pending.map(renderLibraryBook)}</div></section>}
+          <p className="shelf-caption">내가 쓴 생각이 쌓일수록 전시된 책의 깊이가 더해지고, 많이 읽은 분야의 서가는 풍성해집니다.</p>
         </>
       ) : <section className="empty-library"><div className="empty-library-light"><span>열 개의 서가가 첫 책을 기다립니다</span><p>000 총류부터 900 역사까지, 읽고 싶은 분야의 빈 칸을 하나씩 채워보세요.</p><button className="primary" onClick={() => openAddBook()}>첫 책 꽂기</button></div>{LIBRARY_CLASSES.map((item) => <div className="empty-class-row" key={item.code}><b>{item.code}</b><span>{item.name}</span><i /></div>)}</section>}
-      {adding && <AddBook initialClassification={adding.code} onClose={() => setAdding(null)} onAdded={() => { setAdding(null); load(); }} />}
+      {adding && <AddBook initialClassification={adding.code} onClose={() => setAdding(null)} onAdded={() => { setAdding(null); setLocalClassifications(loadLocalClassifications()); load(); }} />}
     </main>
   );
 }
@@ -785,8 +806,14 @@ function BookView({ book, me, onBack }) {
     setSavingClassification(true); setError("");
     const { error: classificationError } = await sb.from("books").update({ classification_code: classification || null }).eq("id", book.id);
     setSavingClassification(false);
-    if (classificationError) setError(classificationSchemaMissing(classificationError) ? "서가 분류 업데이트를 먼저 적용해 주세요." : classificationError.message);
-    else setSharedMessage(`${classificationGroup(classification)?.name || "분류 대기"} 서가에 저장했습니다.`);
+    if (classificationSchemaMissing(classificationError)) {
+      saveLocalClassification(book.id, classification);
+      setSharedMessage(`${classificationGroup(classification)?.name || "분류 대기"} 서가로 이 기기에 저장했습니다.`);
+    } else if (classificationError) setError(classificationError.message);
+    else {
+      saveLocalClassification(book.id, "");
+      setSharedMessage(`${classificationGroup(classification)?.name || "분류 대기"} 서가에 저장했습니다.`);
+    }
   };
 
   return (
@@ -911,7 +938,7 @@ function Sarangbang({ onOpen }) {
   useEffect(() => { load(); }, [load]);
   return (
     <main className="page rooms-page">
-      <header className="page-header"><div><div className="eyebrow">함께 읽고 다르게 생각하는 곳</div><h1>사랑방</h1></div><span className="room-seal">舍</span></header>
+      <header className="page-header"><div><div className="eyebrow">함께 읽고 다르게 생각하는 곳</div><h1>사랑방</h1></div></header>
       <p className="room-lead">나에게 건네진 책과 질문만 머무는 초대형 공간입니다.</p>
       <ErrorNote>{error}</ErrorNote>
       {loading ? <div className="loading">사랑방 문을 여는 중…</div> : rows.length ? <div className="display-shelf">{rows.map((row) => <CoverCard key={row.id} book={row} onClick={() => onOpen(row.id)} meta={`${row.is_mine ? "내가 나눔" : `${row.owner_name}님`} · 공유된 질문 ${row.topic_count || 0}`} />)}</div> : <div className="empty-state"><span>아직 건네진 책이 없습니다</span><p>서재에서 주제와 사람을 골라 나누면 이곳에 책 표지가 놓입니다.</p></div>}
