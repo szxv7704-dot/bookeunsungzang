@@ -390,8 +390,9 @@ function Talk({ book, quotes, me, shared = false }) {
   const requestAnswer = async (history) => {
     try {
       const { text: answer } = await callAI("chat", { book: { title: book.title, author: book.author }, quotes: quotes.map(({ page, content: quoteText, memo }) => ({ page, content: quoteText, memo })), history: history.map((message) => ({ role: message.role === "ai" ? "ai" : "human", content: message.content })) });
-      const { error: answerSaveError } = await sb.from("messages").insert({ session_id: session.id, role: "ai", author_name: "AI", content: answer });
+      const { data: savedAnswer, error: answerSaveError } = await sb.from("messages").insert({ session_id: session.id, role: "ai", author_name: "AI", content: answer }).select().single();
       if (answerSaveError) throw answerSaveError;
+      setMessages((current) => current.some((message) => message.id === savedAnswer.id) ? current : [...current, savedAnswer]);
     } catch (sendError) { setError(sendError.message); }
     setBusy(false);
   };
