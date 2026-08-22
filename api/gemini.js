@@ -8,8 +8,32 @@
 // ── 모델 ──────────────────────────────────────────────
 // 정리 품질이 아쉬우면 여기만 "gpt-5.6-terra" 로 바꾸면 됩니다.
 // ※ 배포 전 platform.openai.com/docs/models 에서 정확한 모델 ID를 한 번 확인하세요.
-const MODEL = "gpt-5.6-luna";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
 const ENDPOINT = "https://api.openai.com/v1/chat/completions";
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://whyoeekvnvqtsgqmlywj.supabase.co";
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoeW9lZWt2bnZxdHNncW1seXdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NjM1NDAsImV4cCI6MjEwMjQzOTU0MH0.mYIrGDbzNo_4Rg_lEKU5cI4YJXyuQtDoQYRC5j1M47U";
+const windows = new Map();
+
+async function authenticate(req) {
+  const authorization = req.headers.authorization || "";
+  if (!authorization.startsWith("Bearer ")) return null;
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: authorization },
+  });
+  return response.ok ? response.json() : null;
+}
+
+function withinLimit(userId) {
+  const now = Date.now();
+  const current = windows.get(userId);
+  if (!current || now - current.startedAt > 10 * 60 * 1000) {
+    windows.set(userId, { startedAt: now, count: 1 });
+    return true;
+  }
+  if (current.count >= 20) return false;
+  current.count += 1;
+  return true;
+}
 
 const CHAT_SYSTEM = `당신은 한 사람의 독서 대화 상대입니다. 요약가나 해설자가 아니라, 같이 읽고 되묻는 사람입니다.
 
@@ -92,11 +116,16 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST만 허용됩니다." });
 
   try {
+    const user = await authenticate(req);
+    if (!user?.id) return res.status(401).json({ error: "로그인한 사용자만 AI 대화를 이용할 수 있습니다." });
+    if (!withinLimit(user.id)) return res.status(429).json({ error: "잠시 대화가 많이 오갔습니다. 10분 뒤 다시 시도해 주세요." });
+
     const { mode, payload } = req.body || {};
 
     // ── 대화 ──────────────────────────────────────────
     if (mode === "chat") {
-      const { book, quotes = [], history = [] } = payload;
+      const { book, quotes = [], history = [] } = payload || {};
+      if (!book?.title) return res.status(400).json({ error: "책 정보가 필요합니다." });
 
       const shelf = quotes.length
         ? quotes.map(q =>
@@ -112,9 +141,9 @@ export default async function handler(req, res) {
       const messages = [
         { role: "system", content: CHAT_SYSTEM },
         { role: "system", content: context },
-        ...history.map(m => ({
+        ...history.slice(-40).map(m => ({
           role: m.role === "ai" ? "assistant" : "user",
-          content: m.content
+          content: String(m.content || "").slice(0, 6000)
         }))
       ];
 
@@ -124,7 +153,8 @@ export default async function handler(req, res) {
 
     // ── 정리 ──────────────────────────────────────────
     if (mode === "organize") {
-      const { book, quotes = [], messages: talk = [] } = payload;
+      const { book, quotes = [], messages: talk = [] } = payload || {};
+      if (!book?.title) return res.status(400).json({ error: "책 정보가 필요합니다." });
 
       const qlist = quotes.length
         ? quotes.map(q => `${q.id}: ${q.page ? `[${q.page}쪽] ` : ""}${q.content}`).join("\n")
