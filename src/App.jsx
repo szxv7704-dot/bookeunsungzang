@@ -88,7 +88,7 @@ function Auth({ invited = false }) {
 
   return (
     <main className="auth-page">
-      <div className="auth-seal"><img src="/icon-192.png" alt="책은성장 단청 문양" /></div>
+      <div className="auth-seal"><img src="/icon-192.png" alt="책은성장 단청 처마" /></div>
       <h1>책은성장</h1>
       <p>{invited ? <>사랑방 초대장이 도착했습니다.<br />초대받은 Google 계정으로 들어오세요.</> : <>읽은 문장이 질문이 되고,<br />나눈 생각이 한 권의 책이 됩니다.</>}</p>
       <ErrorNote>{error}</ErrorNote>

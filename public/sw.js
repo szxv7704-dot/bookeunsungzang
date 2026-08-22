@@ -1,4 +1,4 @@
-const CACHE = "bookeunsungzang-v3-dancheong";
+const CACHE = "bookeunsungzang-v4-gallery";
 const SHELL = ["/", "/manifest.json", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
