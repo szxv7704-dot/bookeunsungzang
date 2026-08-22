@@ -44,7 +44,15 @@ export async function callAI(mode, payload) {
     },
     body: JSON.stringify({ mode, payload }),
   });
-  const result = await response.json();
+  const raw = await response.text();
+  let result;
+  try {
+    result = raw ? JSON.parse(raw) : {};
+  } catch {
+    throw new Error(response.status === 404
+      ? "로컬 AI 서버가 연결되지 않았습니다. 개발 서버를 다시 실행해 주세요."
+      : "AI 서버의 응답을 읽지 못했습니다.");
+  }
   if (!response.ok) throw new Error(result.error || "AI와 연결하지 못했습니다.");
   return result;
 }

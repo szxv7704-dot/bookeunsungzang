@@ -6,19 +6,19 @@
 // Vercel > Settings > Environment Variables 에 OPENAI_API_KEY 등록 필요.
 
 // ── 모델 ──────────────────────────────────────────────
-// 정리 품질이 아쉬우면 여기만 "gpt-5.6-terra" 로 바꾸면 됩니다.
-// ※ 배포 전 platform.openai.com/docs/models 에서 정확한 모델 ID를 한 번 확인하세요.
-const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+// 모델을 바꾸려면 OPENAI_MODEL 환경 변수를 설정합니다.
 const ENDPOINT = "https://api.openai.com/v1/chat/completions";
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://whyoeekvnvqtsgqmlywj.supabase.co";
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoeW9lZWt2bnZxdHNncW1seXdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NjM1NDAsImV4cCI6MjEwMjQzOTU0MH0.mYIrGDbzNo_4Rg_lEKU5cI4YJXyuQtDoQYRC5j1M47U";
+const DEFAULT_SUPABASE_URL = "https://whyoeekvnvqtsgqmlywj.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoeW9lZWt2bnZxdHNncW1seXdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NjM1NDAsImV4cCI6MjEwMjQzOTU0MH0.mYIrGDbzNo_4Rg_lEKU5cI4YJXyuQtDoQYRC5j1M47U";
 const windows = new Map();
 
 async function authenticate(req) {
   const authorization = req.headers.authorization || "";
   if (!authorization.startsWith("Bearer ")) return null;
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: { apikey: SUPABASE_ANON_KEY, Authorization: authorization },
+  const supabaseUrl = process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { apikey: supabaseAnonKey, Authorization: authorization },
   });
   return response.ok ? response.json() : null;
 }
@@ -89,7 +89,7 @@ async function openai(messages, json = false) {
   if (!key) throw new Error("OPENAI_API_KEY가 설정되지 않았습니다.");
 
   const body = {
-    model: MODEL,
+    model: process.env.OPENAI_MODEL || "gpt-5-mini",
     messages,
     max_completion_tokens: json ? 4096 : 1024,
     ...(json ? { response_format: { type: "json_object" } } : {})

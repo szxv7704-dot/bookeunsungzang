@@ -22,6 +22,15 @@ npm install
 npm run dev
 ```
 
+AI 대화와 도서 검색까지 로컬에서 사용하려면 `.env.example`을 `.env.local`로 복사한 뒤 서버 전용 키를 입력합니다.
+
+```env
+OPENAI_API_KEY=발급받은_OpenAI_API_키
+ALADIN_TTB_KEY=발급받은_알라딘_TTB_키
+```
+
+환경 파일을 저장한 다음 개발 서버를 다시 실행해야 키가 반영됩니다. API 키는 브라우저 코드나 GitHub에 올리지 않습니다.
+
 로그인 없이 디자인만 확인하려면 개발 주소 뒤에 `?preview=1`을 붙입니다.
 
 ## 배포 설정

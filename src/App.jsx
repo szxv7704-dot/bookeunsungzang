@@ -387,6 +387,15 @@ function Talk({ book, quotes, me, shared = false }) {
   }, [book.id, shared, title]);
   useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), [messages]);
 
+  const requestAnswer = async (history) => {
+    try {
+      const { text: answer } = await callAI("chat", { book: { title: book.title, author: book.author }, quotes: quotes.map(({ page, content: quoteText, memo }) => ({ page, content: quoteText, memo })), history: history.map((message) => ({ role: message.role === "ai" ? "ai" : "human", content: message.content })) });
+      const { error: answerSaveError } = await sb.from("messages").insert({ session_id: session.id, role: "ai", author_name: "AI", content: answer });
+      if (answerSaveError) throw answerSaveError;
+    } catch (sendError) { setError(sendError.message); }
+    setBusy(false);
+  };
+
   const send = async () => {
     const content = text.trim();
     if (!content || !session || busy) return;
@@ -396,18 +405,20 @@ function Talk({ book, quotes, me, shared = false }) {
     if (saveError) { setError(saveError.message); setBusy(false); return; }
     const next = [...messages, saved];
     setMessages(next);
-    try {
-      const { text: answer } = await callAI("chat", { book: { title: book.title, author: book.author }, quotes: quotes.map(({ page, content: quoteText, memo }) => ({ page, content: quoteText, memo })), history: next.map((message) => ({ role: message.role === "ai" ? "ai" : "human", content: message.content })) });
-      await sb.from("messages").insert({ session_id: session.id, role: "ai", author_name: "AI", content: answer });
-    } catch (sendError) { setError(sendError.message); }
-    setBusy(false);
+    await requestAnswer(next);
+  };
+
+  const retry = async () => {
+    if (busy || messages.at(-1)?.role !== "human") return;
+    setBusy(true); setError("");
+    await requestAnswer(messages);
   };
 
   return (
     <section className="talk-panel">
       <div className="talk-intro"><b>{shared ? "함께 생각을 넓히는 대화" : "나만의 생각 탐색"}</b><p>{shared ? "이곳의 대화는 사랑방 구성원에게 보입니다. 개인적인 탐색은 서재에서 이어가세요." : "AI의 해석은 정답이 아니라 다른 관점입니다. 남기고 싶은 부분만 사랑방에 가져가세요."}</p></div>
       <div className="messages">{messages.map((message) => <article className={`message ${message.role === "ai" ? "ai" : "human"}`} key={message.id}><small>{message.author_name || (message.role === "ai" ? "AI" : "독자")}</small><p>{message.content}</p></article>)}<div ref={endRef} /></div>
-      <ErrorNote>{error}</ErrorNote>
+      {error && <div className="ai-error"><ErrorNote>{error}</ErrorNote>{messages.at(-1)?.role === "human" && <button className="secondary" onClick={retry} disabled={busy}>AI 답변 다시 받기</button>}</div>}
       <div className="composer"><textarea rows="2" value={text} onChange={(event) => setText(event.target.value)} placeholder="무엇이 궁금한가요?" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} /><button className="primary" onClick={send} disabled={busy}>{busy ? "생각 중" : "보내기"}</button></div>
     </section>
   );
